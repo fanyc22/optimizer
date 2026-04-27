@@ -1,0 +1,2 @@
+[console_scripts]
+codesign-opt = codesign_optimizer.cli:app

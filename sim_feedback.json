@@ -1,0 +1,45 @@
+{
+    "simulation_id": "sim_iter_042",
+    "workload": "MoE_Sparse_GNN_Mixed",
+    "global_metrics": {
+        "makespan_us": 14520.5, // 总执行时间 (微秒)，优化的核心目标
+        "total_energy_joules": 8450.2, // 任务总耗能
+        "peak_power_watts": 105000, // 系统峰值功耗
+        "thermal_violation": true, // 是否触发机柜散热报警 (指导优化器降低功耗)
+        "budget_utilization_percent": 85.0 // 当前硬件总成本占预算的百分比
+    },
+    "compute_profile": {
+        "Dense_NPU": {
+            "avg_utilization": "42.5%", // 密集算力利用率低，说明在“等数据”
+            "bubble_time_percent": "55.0%" // 空闲等待时间占比
+        },
+        "Sparse_NPU": {
+            "avg_utilization": "96.2%", // 稀疏算力满载，说明它是当前系统的算力瓶颈
+            "bubble_time_percent": "2.1%"
+        }
+    },
+    "memory_profile": {
+        "local_hbm_bandwidth_util": "98.5%",
+        "cxl_memory_pool": {
+            "avg_access_latency_ns": 450, // 访问远端内存池的平均延迟
+            "conflict_rate": "15.4%" // 多节点争抢内存池导致的冲突率
+        }
+    },
+    "network_profile": {
+        "average_link_utilization": "65%",
+        "top_bottlenecks": [
+            {
+                "link_id": "Link_Switch0_to_MemPool",
+                "utilization": "99.9%", // 链路被打爆
+                "queue_depth_pkts": 4500, // 严重拥塞，长尾延迟的根源
+                "dominant_traffic": "Memory_Read"
+            },
+            {
+                "link_id": "Link_SparseNPU_0_to_DenseNPU_3",
+                "utilization": "95.0%",
+                "queue_depth_pkts": 1200,
+                "dominant_traffic": "Data_Shuffle"
+            }
+        ]
+    }
+}

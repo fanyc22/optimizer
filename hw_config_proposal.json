@@ -1,0 +1,103 @@
+{
+    "optimizer_version": "v2.1_hierarchical",
+    "iteration": 43,
+    "component_library": {
+        "node_types": {
+            "Dense_NPU": {
+                "compute_teraflops_dense": 1000,
+                "compute_teraflops_sparse": 100,
+                "local_memory_gb": 80,
+                "tdp_watts": 700,
+                "cost_unit": 20000
+            },
+            "Sparse_NPU": {
+                "compute_teraflops_dense": 200,
+                "compute_teraflops_sparse": 800, // 针对稀疏优化的特制节点
+                "local_memory_gb": 40,
+                "tdp_watts": 350,
+                "cost_unit": 12000
+            },
+            "Mem_Pool_Node": {
+                "role": "disaggregated_memory",
+                "capacity_gb": 2048,
+                "tdp_watts": 200,
+                "cost_unit": 15000
+            },
+            "Spine_Switch": {
+                "role": "routing",
+                "radix": 64, // 交换机端口数
+                "tdp_watts": 150
+            }
+        },
+        "link_types": {
+            "NVLink_Gen4": {
+                "bandwidth_gbps": 900,
+                "latency_ns": 100,
+                "protocol": "NVLink",
+                "cost_unit": 1000
+            },
+            "CXL_2_0": {
+                "bandwidth_gbps": 64,
+                "latency_ns": 250,
+                "protocol": "CXL",
+                "cost_unit": 200
+            }
+        }
+    },
+    "system_instantiation": {
+        "nodes": [
+            {
+                "node_id": "D_NPU_0",
+                "type": "Dense_NPU"
+            },
+            {
+                "node_id": "D_NPU_1",
+                "type": "Dense_NPU"
+            },
+            {
+                "node_id": "S_NPU_0",
+                "type": "Sparse_NPU"
+            },
+            {
+                "node_id": "S_NPU_1",
+                "type": "Sparse_NPU"
+            },
+            {
+                "node_id": "Pool_0",
+                "type": "Mem_Pool_Node"
+            },
+            {
+                "node_id": "SW_0",
+                "type": "Spine_Switch"
+            }
+            // ... 实际环境中可能会有成百上千个节点
+        ],
+        "topology": [
+            {
+                "src": "D_NPU_0",
+                "dst": "SW_0",
+                "link_type": "NVLink_Gen4",
+                "qty": 2 // 并行使用两条线，实现带宽高聚合
+            },
+            {
+                "src": "S_NPU_0",
+                "dst": "SW_0",
+                "link_type": "NVLink_Gen4",
+                "qty": 1
+            },
+            {
+                "src": "SW_0",
+                "dst": "Pool_0",
+                "link_type": "CXL_2_0",
+                "qty": 4 // Optimizer检测到了访存瓶颈，在此增加到4条CXL链路
+            },
+            {
+                "src": "D_NPU_0",
+                "dst": "S_NPU_0",
+                "link_type": "NVLink_Gen4",
+                "qty": 1 // Optimizer设计的非对称拓扑：计算节点间的直接P2P连接
+            }
+            // ... 完整的图边集合
+        ]
+    }
+}

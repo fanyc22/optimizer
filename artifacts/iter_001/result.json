@@ -1,0 +1,58 @@
+{
+  "objective_score": 8.569932000000001,
+  "constraints": {
+    "feasible": false,
+    "thermal_ok": false,
+    "power_ok": false,
+    "budget_ok": true,
+    "messages": [
+      "Thermal violation reported by simulator.",
+      "Peak power exceeds limit: 105000.0W > 100000.0W."
+    ]
+  },
+  "feedback": {
+    "simulation_id": "sim_iter_042",
+    "workload": "MoE_Sparse_GNN_Mixed",
+    "global_metrics": {
+      "makespan_us": 14520.5,
+      "total_energy_joules": 8450.2,
+      "peak_power_watts": 105000.0,
+      "thermal_violation": true,
+      "budget_utilization_percent": 85.0
+    },
+    "compute_profile": {
+      "Dense_NPU": {
+        "avg_utilization": 0.425,
+        "bubble_time_percent": 0.55
+      },
+      "Sparse_NPU": {
+        "avg_utilization": 0.9620000000000001,
+        "bubble_time_percent": 0.021
+      }
+    },
+    "memory_profile": {
+      "local_hbm_bandwidth_util": 0.985,
+      "cxl_memory_pool": {
+        "avg_access_latency_ns": 450.0,
+        "conflict_rate": 0.154
+      }
+    },
+    "network_profile": {
+      "average_link_utilization": 0.65,
+      "top_bottlenecks": [
+        {
+          "link_id": "Link_Switch0_to_MemPool",
+          "utilization": 0.9990000000000001,
+          "queue_depth_pkts": 4500,
+          "dominant_traffic": "Memory_Read"
+        },
+        {
+          "link_id": "Link_SparseNPU_0_to_DenseNPU_3",
+          "utilization": 0.95,
+          "queue_depth_pkts": 1200,
+          "dominant_traffic": "Data_Shuffle"
+        }
+      ]
+    }
+  }
+}

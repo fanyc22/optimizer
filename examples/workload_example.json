@@ -1,0 +1,29 @@
+{
+  "workload_name": "MoE_Sparse_GNN_Mixed",
+  "tasks": [
+    {
+      "task_id": "dense_stage_0",
+      "task_type": "dense_gemm",
+      "flops_dense": 180000.0,
+      "flops_sparse": 2000.0,
+      "memory_gb": 48.0,
+      "communication_weight": 1.2
+    },
+    {
+      "task_id": "sparse_stage_0",
+      "task_type": "sparse_attention",
+      "flops_dense": 20000.0,
+      "flops_sparse": 220000.0,
+      "memory_gb": 32.0,
+      "communication_weight": 1.5
+    },
+    {
+      "task_id": "embedding_shuffle",
+      "task_type": "sparse_shuffle",
+      "flops_dense": 10000.0,
+      "flops_sparse": 90000.0,
+      "memory_gb": 20.0,
+      "communication_weight": 2.1
+    }
+  ]
+}

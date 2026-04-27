@@ -1,0 +1,126 @@
+{
+  "optimizer_version": "v2.1_hierarchical",
+  "iteration": 44,
+  "component_library": {
+    "node_types": {
+      "Dense_NPU": {
+        "compute_teraflops_dense": 1000.0,
+        "compute_teraflops_sparse": 100.0,
+        "local_memory_gb": 80.0,
+        "tdp_watts": 700.0,
+        "cost_unit": 20000.0,
+        "role": null,
+        "capacity_gb": null,
+        "radix": null
+      },
+      "Sparse_NPU": {
+        "compute_teraflops_dense": 200.0,
+        "compute_teraflops_sparse": 800.0,
+        "local_memory_gb": 40.0,
+        "tdp_watts": 350.0,
+        "cost_unit": 12000.0,
+        "role": null,
+        "capacity_gb": null,
+        "radix": null
+      },
+      "Mem_Pool_Node": {
+        "compute_teraflops_dense": null,
+        "compute_teraflops_sparse": null,
+        "local_memory_gb": null,
+        "tdp_watts": 200.0,
+        "cost_unit": 15000.0,
+        "role": "disaggregated_memory",
+        "capacity_gb": 2048.0,
+        "radix": null
+      },
+      "Spine_Switch": {
+        "compute_teraflops_dense": null,
+        "compute_teraflops_sparse": null,
+        "local_memory_gb": null,
+        "tdp_watts": 150.0,
+        "cost_unit": 0.0,
+        "role": "routing",
+        "capacity_gb": null,
+        "radix": 64
+      }
+    },
+    "link_types": {
+      "NVLink_Gen4": {
+        "bandwidth_gbps": 900.0,
+        "latency_ns": 100.0,
+        "protocol": "NVLink",
+        "cost_unit": 1000.0
+      },
+      "CXL_2_0": {
+        "bandwidth_gbps": 64.0,
+        "latency_ns": 250.0,
+        "protocol": "CXL",
+        "cost_unit": 200.0
+      }
+    }
+  },
+  "system_instantiation": {
+    "nodes": [
+      {
+        "node_id": "D_NPU_0",
+        "type": "Sparse_NPU"
+      },
+      {
+        "node_id": "D_NPU_1",
+        "type": "Dense_NPU"
+      },
+      {
+        "node_id": "S_NPU_0",
+        "type": "Sparse_NPU"
+      },
+      {
+        "node_id": "S_NPU_1",
+        "type": "Sparse_NPU"
+      },
+      {
+        "node_id": "Pool_0",
+        "type": "Mem_Pool_Node"
+      },
+      {
+        "node_id": "SW_0",
+        "type": "Spine_Switch"
+      },
+      {
+        "node_id": "S_NPU_0_clone",
+        "type": "Sparse_NPU"
+      }
+    ],
+    "topology": [
+      {
+        "src": "D_NPU_0",
+        "dst": "SW_0",
+        "link_type": "NVLink_Gen4",
+        "qty": 2
+      },
+      {
+        "src": "S_NPU_0",
+        "dst": "SW_0",
+        "link_type": "NVLink_Gen4",
+        "qty": 1
+      },
+      {
+        "src": "SW_0",
+        "dst": "Pool_0",
+        "link_type": "CXL_2_0",
+        "qty": 4
+      },
+      {
+        "src": "D_NPU_0",
+        "dst": "S_NPU_0",
+        "link_type": "NVLink_Gen4",
+        "qty": 1
+      },
+      {
+        "src": "S_NPU_0_clone",
+        "dst": "SW_0",
+        "link_type": "NVLink_Gen4",
+        "qty": 1
+      }
+    ]
+  }
+}

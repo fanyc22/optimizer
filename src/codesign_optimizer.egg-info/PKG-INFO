@@ -1,0 +1,80 @@
+Metadata-Version: 2.4
+Name: codesign-optimizer
+Version: 0.1.0
+Summary: Two-Stage Hardware-Software Co-Design Optimizer for SuperPOD architectures.
+Author: Co-Design Team
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.7
+Requires-Dist: typer>=0.12
+Requires-Dist: rich>=13.7
+Provides-Extra: dev
+Requires-Dist: pytest>=8.2; extra == "dev"
+
+# Two-Stage Hardware-Software Co-Design Optimizer
+
+Production-oriented Python framework for iterative optimization of future SuperPOD architectures with:
+
+- **Outer loop**: hardware topology and bill-of-material updates.
+- **Inner loop**: software task-to-node mapping and placement strategy.
+- **Simulator coupling**: JSONC-safe file interface for proposal/feedback exchange.
+- **Constraint handling**: thermal, budget, and power-aware feasibility checks.
+
+## Architecture
+
+```text
+.
+├── src/codesign_optimizer
+│   ├── cli.py
+│   ├── config/settings.py
+│   ├── io/jsonc.py
+│   ├── models
+│   │   ├── feedback.py
+│   │   ├── hardware.py
+│   │   └── workload.py
+│   ├── optimizer
+│   │   ├── constraints.py
+│   │   ├── inner_loop.py
+│   │   ├── objective.py
+│   │   ├── orchestrator.py
+│   │   └── outer_loop.py
+│   ├── simulator
+│   │   ├── file_adapter.py
+│   │   └── interface.py
+│   └── utils/logging.py
+├── tests
+│   ├── test_constraints.py
+│   ├── test_jsonc.py
+│   └── test_objective.py
+└── examples
+    └── workload_example.json
+```
+
+## Installation
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+## Quick Start
+
+Use the provided reference files in this workspace:
+
+```bash
+codesign-opt run \
+  --hardware ./hw_config_proposal.json \
+  --workload ./examples/workload_example.json \
+  --feedback ./sim_feedback.json \
+  --iterations 5
+```
+
+The optimizer writes updated hardware proposals and software mapping outputs under `./artifacts`.
+
+## Key Design Notes
+
+- The sample simulator files are **JSONC** (comments included), so parser supports inline `// ...` comments.
+- Hardware and simulator feedback are validated with `pydantic` models.
+- The inner loop and outer loop are decoupled behind stable interfaces for easy replacement with learned policies or advanced solvers.
