@@ -1,0 +1,73 @@
+{
+  "node_types": {
+    "GPU_80TF": {
+      "role": "gpu",
+      "peak_tflops": 80,
+      "memory_bw_gbps": 1800,
+      "local_memory_gb": 80,
+      "slots": 1,
+      "comm_slots": 1,
+      "tdp_watts": 700,
+      "cost_unit": 20000,
+      "rack_units": 1
+    },
+    "CPU_6TF": {
+      "role": "cpu",
+      "peak_tflops": 6,
+      "memory_bw_gbps": 220,
+      "local_memory_gb": 512,
+      "slots": 4,
+      "max_parallelism": 4,
+      "comm_slots": 1,
+      "tdp_watts": 350,
+      "cost_unit": 6000,
+      "rack_units": 1
+    },
+    "CXL_Memory_Pool": {
+      "role": "memory_pool",
+      "capacity_gb": 2048,
+      "memory_bw_gbps": 320,
+      "memory_latency_ns": 300,
+      "comm_slots": 4,
+      "tdp_watts": 250,
+      "cost_unit": 12000,
+      "rack_units": 1
+    },
+    "Rack_Switch_32": {
+      "role": "switch",
+      "radix": 32,
+      "tdp_watts": 180,
+      "cost_unit": 8000,
+      "rack_units": 1
+    }
+  },
+  "link_types": {
+    "NVLINK_SWITCH": {
+      "bandwidth_gbps": 100,
+      "latency_ns": 120,
+      "protocol": "NVLink",
+      "technology": "nvlink_switch_tray",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 1000
+    },
+    "PCIe_CXL": {
+      "bandwidth_gbps": 64,
+      "latency_ns": 250,
+      "protocol": "CXL",
+      "technology": "cxl_switch",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 300
+    },
+    "OPTICAL_400G": {
+      "bandwidth_gbps": 400,
+      "latency_ns": 800,
+      "protocol": "Optical",
+      "technology": "inter_rack_optical",
+      "level": "L4",
+      "lanes": 4,
+      "cost_unit": 3000
+    }
+  }
+}

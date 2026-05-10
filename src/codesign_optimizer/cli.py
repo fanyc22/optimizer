@@ -9,7 +9,10 @@ from codesign_optimizer.config.settings import OptimizerSettings
 from codesign_optimizer.io.jsonc import load_jsonc
 from codesign_optimizer.models.hardware import HardwareProposal
 from codesign_optimizer.models.workload import WorkloadSpec
+from codesign_optimizer.optimizer.evolutionary import HeuristicSearchRunner
 from codesign_optimizer.optimizer.orchestrator import CoDesignOrchestrator
+from codesign_optimizer.optimizer.pipeline_client import MapperSimulatorPipelineClient
+from codesign_optimizer.optimizer.search_space import SearchSpace, load_component_library
 from codesign_optimizer.simulator.file_adapter import FileBackedSimulatorClient
 from codesign_optimizer.utils.logging import configure_logging
 
@@ -62,6 +65,48 @@ def run_optimizer(
         f"Feasible: {best.constraints.feasible}\n"
         f"Artifacts: {artifacts_dir}"
     )
+
+
+@app.command("search")
+def search_optimizer(
+    catalog: Path = typer.Option(..., exists=True, readable=True, help="Component catalog JSON/JSONC."),
+    space: Path = typer.Option(..., exists=True, readable=True, help="Heuristic search-space JSON/JSONC."),
+    workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
+    generations: int = typer.Option(4, min=1, max=1000, help="Number of generations."),
+    population: int = typer.Option(8, min=1, max=10000, help="Population size."),
+    out: Path = typer.Option(Path("artifacts/search_run"), help="Search output directory."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
+) -> None:
+    configure_logging(verbose=verbose)
+
+    component_library = load_component_library(load_jsonc(catalog))
+    search_space = SearchSpace.model_validate(load_jsonc(space))
+    repo_root = search_space.evaluation.repo_root or _default_repo_root()
+    pipeline = MapperSimulatorPipelineClient(repo_root=repo_root, evaluation=search_space.evaluation)
+    runner = HeuristicSearchRunner(
+        component_library=component_library,
+        search_space=search_space,
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=out,
+        population_size=population,
+        generations=generations,
+    )
+    result = runner.run()
+    console.print(
+        "[green]Heuristic search completed[/green]\n"
+        f"Generations: {generations}\n"
+        f"Population: {population}\n"
+        f"Evaluations: {len(result.history)}\n"
+        f"Pareto candidates: {len(result.pareto_frontier)}\n"
+        f"Best score: {result.best.weighted_score:.4f}\n"
+        f"Best feasible: {result.best.feasible}\n"
+        f"Artifacts: {out}"
+    )
+
+
+def _default_repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
 
 
 if __name__ == "__main__":

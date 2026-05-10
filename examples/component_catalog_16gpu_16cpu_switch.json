@@ -1,0 +1,81 @@
+{
+  "node_types": {
+    "GPU_80TF_1800GBS": {
+      "role": "gpu",
+      "peak_tflops": 80,
+      "memory_bw_gbps": 1800,
+      "local_memory_gb": 80,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 700,
+      "cost_unit": 20000,
+      "rack_units": 1
+    },
+    "CPU_6TF_220GBS": {
+      "role": "cpu",
+      "peak_tflops": 6,
+      "memory_bw_gbps": 220,
+      "memory_latency_ns": 80,
+      "local_memory_gb": 512,
+      "slots": 4,
+      "max_parallelism": 4,
+      "comm_slots": 1,
+      "tdp_watts": 350,
+      "cost_unit": 6000,
+      "rack_units": 1
+    },
+    "Spine_Switch_32": {
+      "role": "switch",
+      "radix": 32,
+      "tdp_watts": 250,
+      "cost_unit": 12000,
+      "rack_units": 1
+    },
+    "Spine_Switch_64": {
+      "role": "switch",
+      "radix": 64,
+      "tdp_watts": 420,
+      "cost_unit": 22000,
+      "rack_units": 1
+    }
+  },
+  "link_types": {
+    "GPU_SWITCH_200G": {
+      "bandwidth_gbps": 200,
+      "latency_ns": 120,
+      "protocol": "NVLink",
+      "technology": "gpu_switch_fabric",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 2000
+    },
+    "CPU_SWITCH_50G": {
+      "bandwidth_gbps": 50,
+      "latency_ns": 220,
+      "protocol": "PCIe",
+      "technology": "cpu_switch_fabric",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 500
+    },
+    "GPU_SWITCH_400G": {
+      "bandwidth_gbps": 400,
+      "latency_ns": 120,
+      "protocol": "NVLink",
+      "technology": "gpu_switch_fabric_x2",
+      "level": "L3",
+      "lanes": 2,
+      "cost_unit": 3800
+    },
+    "CPU_SWITCH_100G": {
+      "bandwidth_gbps": 100,
+      "latency_ns": 220,
+      "protocol": "PCIe",
+      "technology": "cpu_switch_fabric_x2",
+      "level": "L3",
+      "lanes": 2,
+      "cost_unit": 900
+    }
+  }
+}

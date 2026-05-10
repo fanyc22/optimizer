@@ -1,0 +1,100 @@
+{
+  "seed": 16,
+  "templates": [
+    {
+      "name": "tc_16gpu_16cpu_single_switch_baseline",
+      "rack_count": 1,
+      "gpu_count": 16,
+      "cpu_count": 16,
+      "memory_pool_count": 0,
+      "switch_count": 1,
+      "gpu_type": "GPU_80TF_1800GBS",
+      "cpu_type": "CPU_6TF_220GBS",
+      "switch_type": "Spine_Switch_32",
+      "endpoint_link_type": "GPU_SWITCH_200G",
+      "gpu_link_type": "GPU_SWITCH_200G",
+      "cpu_link_type": "CPU_SWITCH_50G",
+      "endpoint_link_qty": 1,
+      "gpu_link_qty": 1,
+      "cpu_link_qty": 1,
+      "fabric": "switch",
+      "inter_rack": "none"
+    },
+    {
+      "name": "tc_16gpu_16cpu_single_switch_gpu_upgrade",
+      "rack_count": 1,
+      "gpu_count": 16,
+      "cpu_count": 16,
+      "memory_pool_count": 0,
+      "switch_count": 1,
+      "gpu_type": "GPU_80TF_1800GBS",
+      "cpu_type": "CPU_6TF_220GBS",
+      "switch_type": "Spine_Switch_64",
+      "endpoint_link_type": "GPU_SWITCH_200G",
+      "gpu_link_type": "GPU_SWITCH_400G",
+      "cpu_link_type": "CPU_SWITCH_50G",
+      "endpoint_link_qty": 1,
+      "gpu_link_qty": 1,
+      "cpu_link_qty": 1,
+      "fabric": "switch",
+      "inter_rack": "none"
+    },
+    {
+      "name": "tc_16gpu_16cpu_single_switch_cpu_upgrade",
+      "rack_count": 1,
+      "gpu_count": 16,
+      "cpu_count": 16,
+      "memory_pool_count": 0,
+      "switch_count": 1,
+      "gpu_type": "GPU_80TF_1800GBS",
+      "cpu_type": "CPU_6TF_220GBS",
+      "switch_type": "Spine_Switch_64",
+      "endpoint_link_type": "GPU_SWITCH_200G",
+      "gpu_link_type": "GPU_SWITCH_200G",
+      "cpu_link_type": "CPU_SWITCH_100G",
+      "endpoint_link_qty": 1,
+      "gpu_link_qty": 1,
+      "cpu_link_qty": 1,
+      "fabric": "switch",
+      "inter_rack": "none"
+    }
+  ],
+  "mutation": {
+    "min_gpu_per_rack": 12,
+    "max_gpu_per_rack": 20,
+    "min_cpu_per_rack": 8,
+    "max_cpu_per_rack": 20,
+    "min_memory_pools_per_rack": 0,
+    "max_memory_pools_per_rack": 0,
+    "min_endpoint_link_qty": 1,
+    "max_endpoint_link_qty": 1,
+    "min_inter_rack_link_qty": 1,
+    "max_inter_rack_link_qty": 1,
+    "mutation_rate": 0.35,
+    "bottleneck_mutation_rate": 0.25,
+    "elite_fraction": 0.25
+  },
+  "limits": {
+    "max_total_cost": 520000,
+    "max_peak_power_watts": 18000,
+    "max_rack_power_watts": 18000,
+    "max_rack_units": 42
+  },
+  "objective_weights": {
+    "makespan": 1.0,
+    "cost": 0.10,
+    "power": 0.10,
+    "max_link_utilization": 0.25,
+    "max_queue_delay": 0.25,
+    "remote_memory_contention": 0.0
+  },
+  "evaluation": {
+    "mapper": "heft",
+    "parallel": "auto",
+    "topology_format": "hardware",
+    "sim_extra": [],
+    "mapper_extra": [],
+    "scaling_report": false,
+    "timeout_seconds": 600
+  }
+}

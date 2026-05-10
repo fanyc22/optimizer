@@ -1,0 +1,82 @@
+{
+  "seed": 7,
+  "templates": [
+    {
+      "name": "small_switch_memory_pool",
+      "rack_count": 1,
+      "gpu_count": 2,
+      "cpu_count": 1,
+      "memory_pool_count": 1,
+      "switch_count": 1,
+      "gpu_type": "GPU_80TF",
+      "cpu_type": "CPU_6TF",
+      "memory_pool_type": "CXL_Memory_Pool",
+      "switch_type": "Rack_Switch_32",
+      "endpoint_link_type": "NVLINK_SWITCH",
+      "memory_link_type": "PCIe_CXL",
+      "inter_rack_link_type": "OPTICAL_400G",
+      "endpoint_link_qty": 1,
+      "memory_link_qty": 1,
+      "inter_rack_link_qty": 1,
+      "fabric": "switch",
+      "inter_rack": "none"
+    },
+    {
+      "name": "two_rack_gpu_memory",
+      "rack_count": 2,
+      "gpu_count": 2,
+      "cpu_count": 1,
+      "memory_pool_count": 1,
+      "switch_count": 1,
+      "gpu_type": "GPU_80TF",
+      "cpu_type": "CPU_6TF",
+      "memory_pool_type": "CXL_Memory_Pool",
+      "switch_type": "Rack_Switch_32",
+      "endpoint_link_type": "NVLINK_SWITCH",
+      "memory_link_type": "PCIe_CXL",
+      "inter_rack_link_type": "OPTICAL_400G",
+      "endpoint_link_qty": 1,
+      "memory_link_qty": 1,
+      "inter_rack_link_qty": 1,
+      "fabric": "switch",
+      "inter_rack": "ring"
+    }
+  ],
+  "mutation": {
+    "min_gpu_per_rack": 1,
+    "max_gpu_per_rack": 4,
+    "min_cpu_per_rack": 0,
+    "max_cpu_per_rack": 2,
+    "min_memory_pools_per_rack": 0,
+    "max_memory_pools_per_rack": 2,
+    "min_endpoint_link_qty": 1,
+    "max_endpoint_link_qty": 4,
+    "min_inter_rack_link_qty": 1,
+    "max_inter_rack_link_qty": 4,
+    "mutation_rate": 0.45,
+    "bottleneck_mutation_rate": 0.40,
+    "elite_fraction": 0.25
+  },
+  "limits": {
+    "max_total_cost": 300000,
+    "max_peak_power_watts": 20000,
+    "max_rack_power_watts": 10000,
+    "max_rack_units": 42
+  },
+  "objective_weights": {
+    "makespan": 1.0,
+    "cost": 0.15,
+    "power": 0.10,
+    "max_link_utilization": 0.20,
+    "max_queue_delay": 0.20,
+    "remote_memory_contention": 0.10
+  },
+  "evaluation": {
+    "mapper": "heft",
+    "parallel": "auto",
+    "topology_format": "hardware",
+    "sim_extra": [],
+    "mapper_extra": [],
+    "scaling_report": false
+  }
+}

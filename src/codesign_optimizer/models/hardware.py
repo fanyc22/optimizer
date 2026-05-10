@@ -9,11 +9,19 @@ class NodeTypeSpec(BaseModel):
     compute_teraflops_dense: float | None = None
     compute_teraflops_sparse: float | None = None
     local_memory_gb: float | None = None
+    peak_tflops: float | None = None
+    memory_bw_gbps: float | None = None
+    memory_latency_ns: float | None = None
+    slots: int | None = None
+    max_parallelism: int | None = None
+    comm_slots: int | None = None
     tdp_watts: float = Field(default=0.0, ge=0)
     cost_unit: float = Field(default=0.0, ge=0)
     role: str | None = None
+    rack_units: float = Field(default=1.0, ge=0)
     capacity_gb: float | None = None
     radix: int | None = None
+    area_mm2: float | None = None
 
 
 class LinkTypeSpec(BaseModel):
@@ -21,6 +29,9 @@ class LinkTypeSpec(BaseModel):
     latency_ns: float = Field(ge=0)
     protocol: str
     cost_unit: float = Field(default=0.0, ge=0)
+    lanes: int = Field(default=1, ge=1)
+    technology: str | None = None
+    level: str | None = None
 
 
 class InstantiatedNode(BaseModel):
