@@ -1,7 +1,0 @@
-{
-  "assignment": {
-    "dense_stage_0": "D_NPU_1",
-    "sparse_stage_0": "D_NPU_0",
-    "embedding_shuffle": "D_NPU_0"
-  }
-}
