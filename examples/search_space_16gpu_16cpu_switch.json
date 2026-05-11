@@ -95,6 +95,6 @@
     "sim_extra": [],
     "mapper_extra": [],
     "scaling_report": false,
-    "timeout_seconds": 600
+    "timeout_seconds": 6000
   }
 }
