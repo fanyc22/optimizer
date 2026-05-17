@@ -113,6 +113,8 @@ class HardwareTopologyExporter:
                     "parent": "cluster0",
                     "children": rack_children,
                     "attrs": {
+                        "role": rack.role,
+                        "capacity_limits": rack.limits.model_dump(exclude_none=True),
                         "estimated_power_watts": self._rack_power(rack),
                         "estimated_cost": self._rack_cost(rack),
                         "rack_units": self._rack_units(rack),

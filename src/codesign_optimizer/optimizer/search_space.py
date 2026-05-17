@@ -65,9 +65,21 @@ class EvaluationSettings(BaseModel):
     repo_root: Path | None = None
 
 
-class RackTemplate(BaseModel):
-    name: str
-    rack_count: int = Field(default=1, ge=1)
+RackRole = Literal["compute", "memory", "hybrid"]
+
+
+class RackCapacityLimits(BaseModel):
+    max_gpu_count: int | None = Field(default=None, ge=0)
+    max_cpu_count: int | None = Field(default=None, ge=0)
+    max_memory_pool_count: int | None = Field(default=None, ge=0)
+    max_switch_count: int | None = Field(default=None, ge=0)
+    max_rack_units: float | None = Field(default=None, ge=0)
+    max_power_watts: float | None = Field(default=None, ge=0)
+
+
+class RackSpec(BaseModel):
+    rack_id: str
+    role: RackRole | None = None
     gpu_count: int = Field(default=0, ge=0)
     cpu_count: int = Field(default=0, ge=0)
     memory_pool_count: int = Field(default=0, ge=0)
@@ -80,7 +92,52 @@ class RackTemplate(BaseModel):
     gpu_link_type: str | None = None
     cpu_link_type: str | None = None
     memory_link_type: str | None = None
+    endpoint_link_qty: int = Field(default=1, ge=1)
+    gpu_link_qty: int | None = Field(default=None, ge=1)
+    cpu_link_qty: int | None = Field(default=None, ge=1)
+    memory_link_qty: int = Field(default=1, ge=1)
+    fabric: Literal["switch", "ring"] = "switch"
+    limits: RackCapacityLimits = Field(default_factory=RackCapacityLimits)
+
+    @model_validator(mode="after")
+    def validate_rack(self) -> "RackSpec":
+        compute_count = self.gpu_count + self.cpu_count
+        if compute_count + self.memory_pool_count <= 0:
+            raise ValueError(f"rack {self.rack_id} must contain compute or memory nodes")
+        if self.fabric == "switch" and self.switch_count <= 0:
+            raise ValueError(f"rack {self.rack_id} uses switch fabric but switch_count is 0")
+        if self.role is None:
+            if compute_count > 0 and self.memory_pool_count > 0:
+                self.role = "hybrid"
+            elif self.memory_pool_count > 0:
+                self.role = "memory"
+            else:
+                self.role = "compute"
+        if self.role == "memory" and compute_count > 0:
+            raise ValueError(f"rack {self.rack_id} role=memory cannot contain GPU/CPU nodes")
+        if self.role == "compute" and self.memory_pool_count > 0:
+            raise ValueError(f"rack {self.rack_id} role=compute cannot contain memory pools")
+        return self
+
+
+class RackTemplate(BaseModel):
+    name: str
+    racks: list[RackSpec] | None = None
+    rack_count: int = Field(default=1, ge=1)
+    gpu_count: int = Field(default=0, ge=0)
+    cpu_count: int = Field(default=0, ge=0)
+    memory_pool_count: int = Field(default=0, ge=0)
+    switch_count: int = Field(default=1, ge=0)
+    gpu_type: str | None = None
+    cpu_type: str | None = None
+    memory_pool_type: str | None = None
+    switch_type: str | None = None
+    endpoint_link_type: str | None = None
+    gpu_link_type: str | None = None
+    cpu_link_type: str | None = None
+    memory_link_type: str | None = None
     inter_rack_link_type: str | None = None
+    rack_limits: RackCapacityLimits | None = None
     endpoint_link_qty: int = Field(default=1, ge=1)
     gpu_link_qty: int | None = Field(default=None, ge=1)
     cpu_link_qty: int | None = Field(default=None, ge=1)
@@ -90,7 +147,21 @@ class RackTemplate(BaseModel):
     inter_rack: Literal["none", "ring", "fully_connected"] = "ring"
 
     @model_validator(mode="after")
-    def validate_compute_exists(self) -> "RackTemplate":
+    def validate_template(self) -> "RackTemplate":
+        if self.racks:
+            rack_ids = [rack.rack_id for rack in self.racks]
+            if len(set(rack_ids)) != len(rack_ids):
+                raise ValueError(f"template {self.name} has duplicate rack_id")
+            if not any(rack.gpu_count + rack.cpu_count > 0 for rack in self.racks):
+                raise ValueError(f"template {self.name} must contain at least one compute rack")
+            if self.inter_rack != "none" and not (
+                self.inter_rack_link_type or self.endpoint_link_type or self.racks[0].endpoint_link_type
+            ):
+                raise ValueError(f"template {self.name} needs inter_rack_link_type for inter-rack fabric")
+            return self
+
+        if self.endpoint_link_type is None:
+            raise ValueError(f"template {self.name} must set endpoint_link_type")
         if self.gpu_count + self.cpu_count <= 0:
             raise ValueError(f"template {self.name} must contain at least one compute node")
         if self.fabric == "switch" and self.switch_count <= 0:

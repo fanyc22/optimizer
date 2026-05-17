@@ -1,0 +1,216 @@
+{
+  "node_types": {
+    "GPU_BALANCED_80TF_80GB": {
+      "role": "gpu",
+      "peak_tflops": 80,
+      "memory_bw_gbps": 1800,
+      "memory_latency_ns": 80,
+      "local_memory_gb": 80,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 700,
+      "cost_unit": 24000,
+      "rack_units": 1
+    },
+    "GPU_DENSE_180TF_192GB": {
+      "role": "gpu",
+      "peak_tflops": 180,
+      "memory_bw_gbps": 3500,
+      "memory_latency_ns": 70,
+      "local_memory_gb": 192,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 1000,
+      "cost_unit": 43000,
+      "rack_units": 1
+    },
+    "GPU_VALUE_45TF_48GB": {
+      "role": "gpu",
+      "peak_tflops": 45,
+      "memory_bw_gbps": 900,
+      "memory_latency_ns": 95,
+      "local_memory_gb": 48,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 350,
+      "cost_unit": 9000,
+      "rack_units": 1
+    },
+    "CPU_HIGH_BW_96C": {
+      "role": "cpu",
+      "peak_tflops": 6,
+      "memory_bw_gbps": 460,
+      "memory_latency_ns": 90,
+      "local_memory_gb": 768,
+      "slots": 8,
+      "max_parallelism": 8,
+      "comm_slots": 1,
+      "tdp_watts": 400,
+      "cost_unit": 8500,
+      "rack_units": 1
+    },
+    "CPU_STANDARD_64C": {
+      "role": "cpu",
+      "peak_tflops": 4,
+      "memory_bw_gbps": 320,
+      "memory_latency_ns": 100,
+      "local_memory_gb": 512,
+      "slots": 6,
+      "max_parallelism": 6,
+      "comm_slots": 1,
+      "tdp_watts": 320,
+      "cost_unit": 6500,
+      "rack_units": 1
+    },
+    "CPU_EFFICIENT_128C": {
+      "role": "cpu",
+      "peak_tflops": 5,
+      "memory_bw_gbps": 360,
+      "memory_latency_ns": 110,
+      "local_memory_gb": 512,
+      "slots": 8,
+      "max_parallelism": 8,
+      "comm_slots": 1,
+      "tdp_watts": 280,
+      "cost_unit": 6000,
+      "rack_units": 1
+    },
+    "CXL_MEMORY_POOL_2TB": {
+      "role": "memory_pool",
+      "capacity_gb": 2048,
+      "memory_bw_gbps": 320,
+      "memory_latency_ns": 350,
+      "comm_slots": 4,
+      "tdp_watts": 250,
+      "cost_unit": 14000,
+      "rack_units": 1
+    },
+    "CXL_MEMORY_POOL_4TB": {
+      "role": "memory_pool",
+      "capacity_gb": 4096,
+      "memory_bw_gbps": 512,
+      "memory_latency_ns": 420,
+      "comm_slots": 6,
+      "tdp_watts": 420,
+      "cost_unit": 26000,
+      "rack_units": 2
+    },
+    "HBM_MEMORY_POOL_1TB": {
+      "role": "memory_pool",
+      "capacity_gb": 1024,
+      "memory_bw_gbps": 1000,
+      "memory_latency_ns": 230,
+      "comm_slots": 8,
+      "tdp_watts": 780,
+      "cost_unit": 52000,
+      "rack_units": 2
+    },
+    "HYBRID_RACK_SWITCH_64": {
+      "role": "switch",
+      "radix": 64,
+      "tdp_watts": 420,
+      "cost_unit": 20000,
+      "rack_units": 1
+    },
+    "HYBRID_RACK_SWITCH_128": {
+      "role": "switch",
+      "radix": 128,
+      "tdp_watts": 680,
+      "cost_unit": 42000,
+      "rack_units": 2
+    },
+    "LOW_COST_RACK_SWITCH_64": {
+      "role": "switch",
+      "radix": 64,
+      "tdp_watts": 300,
+      "cost_unit": 14000,
+      "rack_units": 1
+    }
+  },
+  "link_types": {
+    "GPU_FABRIC_200G": {
+      "bandwidth_gbps": 200,
+      "latency_ns": 120,
+      "protocol": "NVLink",
+      "technology": "gpu_switch_fabric_200g",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 2200
+    },
+    "GPU_FABRIC_400G": {
+      "bandwidth_gbps": 400,
+      "latency_ns": 120,
+      "protocol": "NVLink",
+      "technology": "gpu_switch_fabric_400g",
+      "level": "L3",
+      "lanes": 2,
+      "cost_unit": 4000
+    },
+    "GPU_PCIE_128G": {
+      "bandwidth_gbps": 128,
+      "latency_ns": 250,
+      "protocol": "PCIe",
+      "technology": "pcie_gpu_endpoint",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 900
+    },
+    "CPU_PCIE_64G": {
+      "bandwidth_gbps": 64,
+      "latency_ns": 230,
+      "protocol": "PCIe",
+      "technology": "pcie_cpu_endpoint",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 500
+    },
+    "CPU_PCIE_128G": {
+      "bandwidth_gbps": 128,
+      "latency_ns": 220,
+      "protocol": "PCIe",
+      "technology": "pcie_cpu_endpoint_x2",
+      "level": "L3",
+      "lanes": 2,
+      "cost_unit": 900
+    },
+    "CXL_MEM_128G": {
+      "bandwidth_gbps": 128,
+      "latency_ns": 320,
+      "protocol": "CXL",
+      "technology": "cxl_type3_memory_link",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 700
+    },
+    "CXL_MEM_256G": {
+      "bandwidth_gbps": 256,
+      "latency_ns": 300,
+      "protocol": "CXL",
+      "technology": "cxl_type3_memory_link_x2",
+      "level": "L3",
+      "lanes": 2,
+      "cost_unit": 1300
+    },
+    "OPTICAL_400G": {
+      "bandwidth_gbps": 100,
+      "latency_ns": 20000,
+      "protocol": "Optical",
+      "technology": "inter_rack_optical_400g",
+      "level": "L4",
+      "lanes": 4,
+      "cost_unit": 3500
+    },
+    "OPTICAL_800G": {
+      "bandwidth_gbps": 200,
+      "latency_ns": 22500,
+      "protocol": "Optical",
+      "technology": "inter_rack_optical_800g",
+      "level": "L4",
+      "lanes": 8,
+      "cost_unit": 6500
+    }
+  }
+}

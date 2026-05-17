@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 import random
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,6 +79,7 @@ class HeuristicSearchRunner:
         out_dir: Path,
         population_size: int,
         generations: int,
+        concurrency: int = 1,
     ) -> None:
         self._library = component_library
         self._space = search_space
@@ -85,10 +88,12 @@ class HeuristicSearchRunner:
         self._out_dir = out_dir
         self._population_size = population_size
         self._generations = generations
+        self._concurrency = max(1, concurrency)
         self._rng = random.Random(search_space.seed)
         self._exporter = HardwareTopologyExporter(component_library)
         self._repairer = CandidateRepairer(component_library, search_space)
         self._cache: dict[str, CandidateEvaluation] = {}
+        self._cache_lock = threading.Lock()
 
     def run(self) -> SearchResult:
         self._out_dir.mkdir(parents=True, exist_ok=True)
@@ -117,11 +122,32 @@ class HeuristicSearchRunner:
         population: list[Chromosome],
         generation: int,
     ) -> list[CandidateEvaluation]:
-        result: list[CandidateEvaluation] = []
-        for index, chromosome in enumerate(population):
-            candidate_dir = self._out_dir / f"iter_{generation:03d}" / f"candidate_{index:03d}"
-            result.append(self._evaluate_candidate(chromosome, generation, index, candidate_dir))
-        return result
+        if self._concurrency <= 1 or len(population) <= 1:
+            result: list[CandidateEvaluation] = []
+            for index, chromosome in enumerate(population):
+                candidate_dir = self._out_dir / f"iter_{generation:03d}" / f"candidate_{index:03d}"
+                result.append(self._evaluate_candidate(chromosome, generation, index, candidate_dir))
+            return result
+
+        result: list[CandidateEvaluation | None] = [None] * len(population)
+        max_workers = min(self._concurrency, len(population))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for index, chromosome in enumerate(population):
+                candidate_dir = self._out_dir / f"iter_{generation:03d}" / f"candidate_{index:03d}"
+                future = executor.submit(
+                    self._evaluate_candidate,
+                    chromosome,
+                    generation,
+                    index,
+                    candidate_dir,
+                )
+                futures[future] = index
+            for future in as_completed(futures):
+                index = futures[future]
+                result[index] = future.result()
+
+        return [item for item in result if item is not None]
 
     def _evaluate_candidate(
         self,
@@ -149,8 +175,8 @@ class HeuristicSearchRunner:
                 penalty=repair.penalty + 1_000_000.0,
             )
 
-        if signature in self._cache:
-            cached = self._cache[signature]
+        cached = self._cached_evaluation(signature)
+        if cached is not None:
             copied = CandidateEvaluation(
                 generation=generation,
                 index=index,
@@ -179,7 +205,7 @@ class HeuristicSearchRunner:
                 repair.messages,
             )
             dump_json(candidate_dir / "score.json", evaluation.to_summary())
-            self._cache[signature] = evaluation
+            self._store_cached_evaluation(signature, evaluation)
             return evaluation
 
         feedback: ParsedPipelineFeedback | None = None
@@ -214,8 +240,16 @@ class HeuristicSearchRunner:
         dump_json(candidate_dir / "score.json", evaluation.to_summary())
         if feedback is not None:
             dump_json(candidate_dir / "feedback.json", _feedback_to_dict(feedback))
-        self._cache[signature] = evaluation
+        self._store_cached_evaluation(signature, evaluation)
         return evaluation
+
+    def _cached_evaluation(self, signature: str) -> CandidateEvaluation | None:
+        with self._cache_lock:
+            return self._cache.get(signature)
+
+    def _store_cached_evaluation(self, signature: str, evaluation: CandidateEvaluation) -> None:
+        with self._cache_lock:
+            self._cache.setdefault(signature, evaluation)
 
     def _penalty_evaluation(
         self,
@@ -321,14 +355,15 @@ class HeuristicSearchRunner:
         top_link = feedback.link_stats[0] if feedback.link_stats else {}
         top_domain = str(top_link.get("stats_domain") or top_link.get("domain") or "")
         if feedback.remote_memory_contention_ns > 0:
-            for rack in child.racks:
+            memory_racks = [rack for rack in child.racks if rack.role in {"memory", "hybrid"}]
+            for rack in memory_racks:
                 if rack.memory_pool_count < self._space.mutation.max_memory_pools_per_rack:
                     rack.memory_pool_count += 1
-                    rack.memory_link_qty = min(
-                        self._space.mutation.max_endpoint_link_qty,
-                        rack.memory_link_qty + 1,
-                    )
-                    return child
+                rack.memory_link_qty = min(
+                    self._space.mutation.max_endpoint_link_qty,
+                    rack.memory_link_qty + 1,
+                )
+                return child
         if top_domain.startswith("cluster:"):
             child.inter_rack_link_qty = min(
                 self._space.mutation.max_inter_rack_link_qty,
@@ -371,6 +406,7 @@ class HeuristicSearchRunner:
             {
                 "generations": self._generations,
                 "population": self._population_size,
+                "concurrency": self._concurrency,
                 "evaluations": len(history),
                 "feasible_evaluations": sum(1 for item in history if item.feasible),
                 "best": best.to_summary(),

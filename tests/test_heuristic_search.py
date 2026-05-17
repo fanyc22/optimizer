@@ -1,6 +1,10 @@
+import random
+import threading
+import time
 from pathlib import Path
 
 from codesign_optimizer.models.hardware import ComponentLibrary
+from codesign_optimizer.optimizer.chromosome import chromosome_from_template, mutate_random
 from codesign_optimizer.optimizer.evolutionary import HeuristicSearchRunner
 from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback, parse_pipeline_feedback
 from codesign_optimizer.optimizer.repair import CandidateRepairer
@@ -29,6 +33,40 @@ class FakePipelineClient:
         [x] [network] [info] Network top congested link rank=1 id=rack0_sw0_to_rack1_sw0 src_device=0 dst_device=1 level=L4 domain=cluster:cluster0 stats_domain=cluster:cluster0 technology=optical route_class= bytes=4096 busy_time_ns=80 queue_delay_ns=30 transmissions=2 max_queue_depth=3 utilization=0.750000
         """
         return parse_pipeline_feedback(summary=summary, simulator_stdout=stdout)
+
+
+class SlowFakePipelineClient:
+    def __init__(self, delay_s: float = 0.05) -> None:
+        self.calls = 0
+        self.active = 0
+        self.max_active = 0
+        self.delay_s = delay_s
+        self._lock = threading.Lock()
+
+    def run(self, *, topology_path: Path, workload_path: Path, out_dir: Path) -> ParsedPipelineFeedback:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            self.calls += 1
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            call_id = self.calls
+        try:
+            time.sleep(self.delay_s)
+            makespan = max(10, 1000 - call_id * 10)
+            summary = {
+                "case_name": topology_path.stem,
+                "success": True,
+                "inputs": {"workload": str(workload_path)},
+                "simulator": {"finished_count": 1, "expected_finished_count": 1},
+            }
+            stdout = f"""
+            [x] [statistics] [info] sys[0], Wall time: {makespan}
+            [x] [network] [info] Network top congested link rank=1 id=link{call_id} src_device=0 dst_device=1 level=L4 domain=cluster:cluster0 stats_domain=cluster:cluster0 technology=optical route_class= bytes=4096 busy_time_ns=80 queue_delay_ns=30 transmissions=2 max_queue_depth=3 utilization=0.750000
+            """
+            return parse_pipeline_feedback(summary=summary, simulator_stdout=stdout)
+        finally:
+            with self._lock:
+                self.active -= 1
 
 
 def _library(radix: int = 32) -> ComponentLibrary:
@@ -131,6 +169,101 @@ def _space() -> SearchSpace:
     )
 
 
+def _hetero_space() -> SearchSpace:
+    return SearchSpace.model_validate(
+        {
+            "seed": 11,
+            "templates": [
+                {
+                    "name": "hetero_racks",
+                    "racks": [
+                        {
+                            "rack_id": "gpu-rack",
+                            "role": "compute",
+                            "gpu_count": 2,
+                            "cpu_count": 0,
+                            "memory_pool_count": 0,
+                            "switch_count": 1,
+                            "gpu_type": "GPU",
+                            "switch_type": "SW",
+                            "endpoint_link_type": "FAST",
+                            "fabric": "switch",
+                            "limits": {
+                                "max_gpu_count": 2,
+                                "max_cpu_count": 0,
+                                "max_memory_pool_count": 0,
+                                "max_switch_count": 1,
+                                "max_rack_units": 8,
+                                "max_power_watts": 4000,
+                            },
+                        },
+                        {
+                            "rack_id": "cpu-rack",
+                            "role": "compute",
+                            "gpu_count": 0,
+                            "cpu_count": 2,
+                            "memory_pool_count": 0,
+                            "switch_count": 1,
+                            "cpu_type": "CPU",
+                            "switch_type": "SW",
+                            "endpoint_link_type": "FAST",
+                            "cpu_link_type": "FAST",
+                            "fabric": "switch",
+                            "limits": {
+                                "max_gpu_count": 0,
+                                "max_cpu_count": 2,
+                                "max_memory_pool_count": 0,
+                                "max_switch_count": 1,
+                                "max_rack_units": 8,
+                                "max_power_watts": 4000,
+                            },
+                        },
+                        {
+                            "rack_id": "mem-rack",
+                            "role": "memory",
+                            "gpu_count": 0,
+                            "cpu_count": 0,
+                            "memory_pool_count": 1,
+                            "switch_count": 1,
+                            "memory_pool_type": "MEM",
+                            "switch_type": "SW",
+                            "endpoint_link_type": "FAST",
+                            "memory_link_type": "CXL",
+                            "fabric": "switch",
+                            "limits": {
+                                "max_gpu_count": 0,
+                                "max_cpu_count": 0,
+                                "max_memory_pool_count": 1,
+                                "max_switch_count": 1,
+                                "max_rack_units": 8,
+                                "max_power_watts": 4000,
+                            },
+                        },
+                    ],
+                    "inter_rack": "ring",
+                    "inter_rack_link_type": "OPTICAL",
+                }
+            ],
+            "mutation": {
+                "min_gpu_per_rack": 0,
+                "max_gpu_per_rack": 3,
+                "min_cpu_per_rack": 0,
+                "max_cpu_per_rack": 3,
+                "min_memory_pools_per_rack": 0,
+                "max_memory_pools_per_rack": 2,
+                "max_endpoint_link_qty": 3,
+                "max_inter_rack_link_qty": 3,
+            },
+            "limits": {
+                "max_total_cost": 200000,
+                "max_peak_power_watts": 20000,
+                "max_rack_power_watts": 10000,
+                "max_rack_units": 42,
+            },
+        }
+    )
+
+
 def test_heuristic_search_runs_with_fake_pipeline(tmp_path: Path) -> None:
     workload = tmp_path / "workload.json"
     workload.write_text("{}", encoding="utf-8")
@@ -153,6 +286,51 @@ def test_heuristic_search_runs_with_fake_pipeline(tmp_path: Path) -> None:
     assert (tmp_path / "search" / "best_hardware_topology.json").exists()
 
 
+def test_heuristic_search_evaluates_candidates_concurrently(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    pipeline = SlowFakePipelineClient()
+    runner = HeuristicSearchRunner(
+        component_library=_library(),
+        search_space=_space(),
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=tmp_path / "parallel_search",
+        population_size=4,
+        generations=1,
+        concurrency=3,
+    )
+
+    result = runner.run()
+
+    assert result.best.feasible
+    assert pipeline.calls > 0
+    assert pipeline.max_active >= 2
+    assert (tmp_path / "parallel_search" / "summary.json").exists()
+
+
+def test_heterogeneous_rack_search_runs_with_fake_pipeline(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    pipeline = FakePipelineClient()
+    runner = HeuristicSearchRunner(
+        component_library=_library(),
+        search_space=_hetero_space(),
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=tmp_path / "hetero_search",
+        population_size=3,
+        generations=2,
+    )
+
+    result = runner.run()
+
+    assert pipeline.calls > 0
+    assert result.best.feasible
+    best_topology = tmp_path / "hetero_search" / "best_hardware_topology.json"
+    assert best_topology.exists()
+
+
 def test_repair_marks_switch_radix_violation() -> None:
     space = _space()
     library = _library(radix=1)
@@ -163,3 +341,153 @@ def test_repair_marks_switch_radix_violation() -> None:
 
     assert not report.feasible
     assert any("switch radix exceeded" in msg for msg in report.messages)
+
+
+def test_repair_allows_memory_only_rack_without_adding_compute() -> None:
+    space = _hetero_space()
+    chromosome = chromosome_from_template(space.templates[0])
+
+    report = CandidateRepairer(_library(), space).repair_and_validate(chromosome)
+
+    assert report.feasible
+    memory_rack = next(rack for rack in report.chromosome.racks if rack.role == "memory")
+    assert memory_rack.gpu_count == 0
+    assert memory_rack.cpu_count == 0
+    assert memory_rack.memory_pool_count == 1
+
+
+def test_mutation_respects_rack_roles() -> None:
+    space = _hetero_space()
+    chromosome = chromosome_from_template(space.templates[0])
+
+    mutated = mutate_random(chromosome, space, random.Random(5), intensity=50)
+
+    for rack in mutated.racks:
+        if rack.role == "memory":
+            assert rack.gpu_count == 0
+            assert rack.cpu_count == 0
+            assert rack.memory_pool_count > 0
+        if rack.role == "compute":
+            assert rack.memory_pool_count == 0
+            assert rack.gpu_count + rack.cpu_count > 0
+            if rack.gpu_type is None:
+                assert rack.gpu_count == 0
+            if rack.cpu_type is None:
+                assert rack.cpu_count == 0
+
+
+def test_ring_radix_uses_actual_inter_rack_degree() -> None:
+    library = _library(radix=2)
+    space = SearchSpace.model_validate(
+        {
+            "templates": [
+                {
+                    "name": "two_rack_degree_one",
+                    "racks": [
+                        {
+                            "rack_id": "rack0",
+                            "role": "compute",
+                            "gpu_count": 1,
+                            "switch_count": 1,
+                            "gpu_type": "GPU",
+                            "switch_type": "SW",
+                            "endpoint_link_type": "FAST",
+                        },
+                        {
+                            "rack_id": "rack1",
+                            "role": "compute",
+                            "gpu_count": 1,
+                            "switch_count": 1,
+                            "gpu_type": "GPU",
+                            "switch_type": "SW",
+                            "endpoint_link_type": "FAST",
+                        },
+                    ],
+                    "inter_rack": "ring",
+                    "inter_rack_link_type": "FAST",
+                }
+            ],
+            "limits": {
+                "max_total_cost": 200000,
+                "max_peak_power_watts": 20000,
+                "max_rack_power_watts": 10000,
+                "max_rack_units": 42,
+            },
+        }
+    )
+
+    report = CandidateRepairer(library, space).repair_and_validate(
+        chromosome_from_template(space.templates[0])
+    )
+
+    assert report.feasible
+
+
+def test_rack_capacity_limits_bound_repair() -> None:
+    space = _hetero_space()
+    chromosome = chromosome_from_template(space.templates[0])
+    gpu_rack = next(rack for rack in chromosome.racks if rack.rack_id == "gpu-rack")
+    mem_rack = next(rack for rack in chromosome.racks if rack.rack_id == "mem-rack")
+    gpu_rack.gpu_count = 8
+    mem_rack.memory_pool_count = 8
+
+    report = CandidateRepairer(_library(), space).repair_and_validate(chromosome)
+
+    repaired_gpu_rack = next(rack for rack in report.chromosome.racks if rack.rack_id == "gpu-rack")
+    repaired_mem_rack = next(rack for rack in report.chromosome.racks if rack.rack_id == "mem-rack")
+    assert repaired_gpu_rack.gpu_count == 2
+    assert repaired_mem_rack.memory_pool_count == 1
+    assert report.feasible
+
+
+def test_homogeneous_template_rack_limits_are_copied() -> None:
+    space = SearchSpace.model_validate(
+        {
+            "templates": [
+                {
+                    "name": "limited_homogeneous",
+                    "rack_count": 2,
+                    "gpu_count": 2,
+                    "cpu_count": 1,
+                    "memory_pool_count": 0,
+                    "switch_count": 1,
+                    "gpu_type": "GPU",
+                    "cpu_type": "CPU",
+                    "switch_type": "SW",
+                    "endpoint_link_type": "FAST",
+                    "rack_limits": {
+                        "max_gpu_count": 1,
+                        "max_cpu_count": 1,
+                        "max_memory_pool_count": 0,
+                        "max_switch_count": 1,
+                    },
+                    "inter_rack": "none",
+                }
+            ],
+            "mutation": {
+                "min_gpu_per_rack": 0,
+                "max_gpu_per_rack": 3,
+                "min_cpu_per_rack": 0,
+                "max_cpu_per_rack": 3,
+            },
+        }
+    )
+    chromosome = chromosome_from_template(space.templates[0])
+
+    report = CandidateRepairer(_library(), space).repair_and_validate(chromosome)
+
+    assert report.feasible
+    assert [rack.gpu_count for rack in report.chromosome.racks] == [1, 1]
+    assert all(rack.limits.max_gpu_count == 1 for rack in report.chromosome.racks)
+
+
+def test_rack_specific_power_limit_marks_candidate_infeasible() -> None:
+    space = _hetero_space()
+    chromosome = chromosome_from_template(space.templates[0])
+    gpu_rack = next(rack for rack in chromosome.racks if rack.rack_id == "gpu-rack")
+    gpu_rack.limits.max_power_watts = 100
+
+    report = CandidateRepairer(_library(), space).repair_and_validate(chromosome)
+
+    assert not report.feasible
+    assert any("gpu-rack power exceeds limit" in msg for msg in report.messages)

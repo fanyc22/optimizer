@@ -87,8 +87,13 @@ codesign-opt search \
   --workload ../mapper/examples/cg_iteration_workload.json \
   --generations 4 \
   --population 8 \
+  --concurrency 4 \
   --out ./artifacts/search_run
 ```
+
+`--concurrency` caps how many candidates in the same generation are evaluated
+at once. Each concurrent evaluation gets its own `iter_*/candidate_*/wrapper`
+directory and launches an independent mapper/simulator wrapper process.
 
 The search writes per-candidate artifacts under `iter_*/candidate_*`:
 

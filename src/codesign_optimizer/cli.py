@@ -74,6 +74,12 @@ def search_optimizer(
     workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
     generations: int = typer.Option(4, min=1, max=1000, help="Number of generations."),
     population: int = typer.Option(8, min=1, max=10000, help="Population size."),
+    concurrency: int = typer.Option(
+        1,
+        min=1,
+        max=1024,
+        help="Maximum number of candidate mapper/simulator pipeline runs to execute concurrently per generation.",
+    ),
     out: Path = typer.Option(Path("artifacts/search_run"), help="Search output directory."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
 ) -> None:
@@ -91,12 +97,14 @@ def search_optimizer(
         out_dir=out,
         population_size=population,
         generations=generations,
+        concurrency=concurrency,
     )
     result = runner.run()
     console.print(
         "[green]Heuristic search completed[/green]\n"
         f"Generations: {generations}\n"
         f"Population: {population}\n"
+        f"Concurrency: {concurrency}\n"
         f"Evaluations: {len(result.history)}\n"
         f"Pareto candidates: {len(result.pareto_frontier)}\n"
         f"Best score: {result.best.weighted_score:.4f}\n"
