@@ -13,6 +13,7 @@ from codesign_optimizer.optimizer.evolutionary import HeuristicSearchRunner
 from codesign_optimizer.optimizer.orchestrator import CoDesignOrchestrator
 from codesign_optimizer.optimizer.pipeline_client import MapperSimulatorPipelineClient
 from codesign_optimizer.optimizer.search_space import SearchSpace, load_component_library
+from codesign_optimizer.optimizer.tcro import TCROConfig, TCROSearchRunner
 from codesign_optimizer.simulator.file_adapter import FileBackedSimulatorClient
 from codesign_optimizer.utils.logging import configure_logging
 
@@ -107,6 +108,60 @@ def search_optimizer(
         f"Concurrency: {concurrency}\n"
         f"Evaluations: {len(result.history)}\n"
         f"Pareto candidates: {len(result.pareto_frontier)}\n"
+        f"Best score: {result.best.weighted_score:.4f}\n"
+        f"Best feasible: {result.best.feasible}\n"
+        f"Artifacts: {out}"
+    )
+
+
+@app.command("tcro")
+def tcro_optimizer(
+    catalog: Path = typer.Option(..., exists=True, readable=True, help="Component catalog JSON/JSONC."),
+    space: Path = typer.Option(..., exists=True, readable=True, help="TCRO search-space JSON/JSONC."),
+    workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
+    steps: int = typer.Option(8, min=1, max=10000, help="Number of TCRO continuous-update steps."),
+    samples_per_step: int = typer.Option(4, min=1, max=10000, help="Discrete samples evaluated per TCRO step."),
+    concurrency: int = typer.Option(1, min=1, max=1024, help="Maximum concurrent mapper/simulator runs per step."),
+    learning_rate: float = typer.Option(0.35, min=0.000001, help="Pseudo-gradient learning rate."),
+    initial_temperature: float = typer.Option(1.0, min=0.0, help="Initial Gumbel sampling temperature."),
+    temperature_decay: float = typer.Option(0.92, min=0.000001, max=1.0, help="Temperature decay per step."),
+    min_temperature: float = typer.Option(0.05, min=0.0, help="Lower bound for sampling temperature."),
+    link_prune_threshold: float = typer.Option(0.25, min=0.0, help="Inter-rack alpha below this value is pruned."),
+    checkpoint_interval: int = typer.Option(1, min=1, help="Write supernet_state.json every N steps."),
+    out: Path = typer.Option(Path("artifacts/tcro_run"), help="TCRO output directory."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
+) -> None:
+    configure_logging(verbose=verbose)
+
+    component_library = load_component_library(load_jsonc(catalog))
+    search_space = SearchSpace.model_validate(load_jsonc(space))
+    repo_root = search_space.evaluation.repo_root or _default_repo_root()
+    pipeline = MapperSimulatorPipelineClient(repo_root=repo_root, evaluation=search_space.evaluation)
+    runner = TCROSearchRunner(
+        component_library=component_library,
+        search_space=search_space,
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=out,
+        steps=steps,
+        samples_per_step=samples_per_step,
+        concurrency=concurrency,
+        config=TCROConfig(
+            learning_rate=learning_rate,
+            initial_temperature=initial_temperature,
+            temperature_decay=temperature_decay,
+            min_temperature=min_temperature,
+            link_prune_threshold=link_prune_threshold,
+            checkpoint_interval=checkpoint_interval,
+        ),
+    )
+    result = runner.run()
+    console.print(
+        "[green]TCRO search completed[/green]\n"
+        f"Steps: {steps}\n"
+        f"Samples per step: {samples_per_step}\n"
+        f"Concurrency: {concurrency}\n"
+        f"Evaluations: {len(result.history)}\n"
         f"Best score: {result.best.weighted_score:.4f}\n"
         f"Best feasible: {result.best.feasible}\n"
         f"Artifacts: {out}"

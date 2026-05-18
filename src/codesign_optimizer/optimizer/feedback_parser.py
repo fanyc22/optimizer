@@ -31,6 +31,12 @@ _REMOTE_QUEUE_RE = re.compile(
 _REMOTE_SERVICE_RE = re.compile(
     r"sys\[(?P<sys>\d+)\], Remote mem provider service time:\s+(?P<time>\d+)"
 )
+_TYPE_TIME_RE = re.compile(
+    r"sys\[(?P<sys>\d+)\], (?P<kind>CPU|GPU|Comm|Remote mem) time:\s+(?P<time>\d+)"
+)
+_OVERLAP_RE = re.compile(
+    r"sys\[(?P<sys>\d+)\], Total compute-communication overlap:\s+(?P<time>\d+)"
+)
 _LINK_RE = re.compile(
     r"Network top congested link rank=(?P<rank>\d+) id=(?P<id>\S+) "
     r"src_device=(?P<src>\d+) dst_device=(?P<dst>\d+) "
@@ -57,6 +63,8 @@ class ParsedPipelineFeedback:
     domain_stats: list[dict[str, Any]] = field(default_factory=list)
     remote_memory_stats: dict[str, int] = field(default_factory=dict)
     scaling_report: dict[str, dict[str, int]] = field(default_factory=dict)
+    operator_times: dict[str, dict[str, int]] = field(default_factory=dict)
+    compute_comm_overlap_ns: int = 0
     simulator_stdout_path: Path | None = None
 
     @property
@@ -102,6 +110,8 @@ def parse_pipeline_feedback(
     link_stats: list[dict[str, Any]] = []
     domain_stats: list[dict[str, Any]] = []
     scaling: dict[str, dict[str, int]] = {}
+    operator_times: dict[str, dict[str, int]] = {}
+    compute_comm_overlap = 0
 
     for line in simulator_stdout.splitlines():
         if match := _FINISHED_RE.search(line):
@@ -116,6 +126,12 @@ def parse_pipeline_feedback(
             remote_queue += int(match.group("time"))
         if match := _REMOTE_SERVICE_RE.search(line):
             remote_service += int(match.group("time"))
+        if match := _TYPE_TIME_RE.search(line):
+            sys_id = match.group("sys")
+            kind = match.group("kind").lower().replace(" ", "_")
+            operator_times.setdefault(sys_id, {})[kind] = int(match.group("time"))
+        if match := _OVERLAP_RE.search(line):
+            compute_comm_overlap += int(match.group("time"))
         if match := _LINK_RE.search(line):
             link_stats.append(
                 {
@@ -213,6 +229,8 @@ def parse_pipeline_feedback(
             "provider_service_time": remote_service,
         },
         scaling_report=scaling,
+        operator_times=operator_times,
+        compute_comm_overlap_ns=compute_comm_overlap,
         simulator_stdout_path=stdout_path,
     )
 

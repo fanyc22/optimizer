@@ -110,6 +110,30 @@ The search does not modify mapper, ET, or simulator semantics. The wrapper
 still projects only rank compute nodes to mapper; switch/router/memory-only
 nodes remain simulator-only explicit graph nodes.
 
+## TCRO Continuous-Relaxed Search
+
+TCRO keeps a continuous supernet inside the optimizer, samples discrete
+`hardware_topology.v2` candidates for evaluation, then uses simulator telemetry
+as pseudo-gradients to update node-type logits and link alpha values:
+
+```bash
+codesign-opt tcro \
+  --catalog ./examples/component_catalog.json \
+  --space ./examples/search_space.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --steps 8 \
+  --samples-per-step 4 \
+  --concurrency 2 \
+  --out ./artifacts/tcro_run
+```
+
+TCRO writes `step_*/sample_*` artifacts plus `supernet_state.json`,
+`telemetry_history.json`, `tcro_summary.json`, `best_proposal.json`, and
+`best_hardware_topology.json`. The simulator still only sees legal discrete
+hardware graphs; the continuous relaxation is optimizer-internal. TCRO v1
+initializes from the first template in the search space, so use a single
+starting template when running focused continuous relaxation experiments.
+
 ## Key Design Notes
 
 - The sample simulator files are **JSONC** (comments included), so parser supports inline `// ...` comments.
