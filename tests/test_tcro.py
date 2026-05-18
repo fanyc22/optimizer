@@ -4,6 +4,7 @@ from pathlib import Path
 
 from codesign_optimizer.models.hardware import ComponentLibrary
 from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback, parse_pipeline_feedback
+from codesign_optimizer.optimizer.exporter import HardwareTopologyExporter
 from codesign_optimizer.optimizer.repair import CandidateRepairer
 from codesign_optimizer.optimizer.search_space import SearchSpace
 from codesign_optimizer.optimizer.tcro import (
@@ -218,6 +219,89 @@ def test_tcro_lowering_exports_valid_topology(tmp_path: Path) -> None:
 
     assert report.feasible
     assert candidate.chromosome.inter_rack in {"ring", "fully_connected"}
+
+
+def test_tcro_optional_rack_slot_is_lowered_only_after_activation(tmp_path: Path) -> None:
+    space = SearchSpace.model_validate(
+        {
+            **_space().model_dump(mode="json"),
+            "templates": [
+                {
+                    "name": "tcro_latent",
+                    "racks": [
+                        {
+                            "rack_id": "rack0",
+                            "role": "hybrid",
+                            "gpu_count": 1,
+                            "cpu_count": 1,
+                            "memory_pool_count": 1,
+                            "switch_count": 1,
+                            "gpu_type": "GPU_SMALL",
+                            "cpu_type": "CPU",
+                            "memory_pool_type": "MEM",
+                            "switch_type": "SW",
+                            "endpoint_link_type": "FAST",
+                            "memory_link_type": "FAST",
+                            "fabric": "switch",
+                        },
+                        {
+                            "rack_id": "latent-mem",
+                            "role": "memory",
+                            "optional": True,
+                            "active": False,
+                            "activation_alpha": 0.1,
+                            "gpu_count": 0,
+                            "cpu_count": 0,
+                            "memory_pool_count": 0,
+                            "switch_count": 0,
+                            "memory_pool_type": "MEM",
+                            "switch_type": "SW",
+                            "endpoint_link_type": "FAST",
+                            "memory_link_type": "FAST",
+                            "fabric": "switch",
+                            "limits": {
+                                "max_memory_pool_count": 2,
+                                "max_switch_count": 1,
+                            },
+                        },
+                    ],
+                    "inter_rack": "ring",
+                    "inter_rack_link_type": "OPTICAL",
+                }
+            ],
+        }
+    )
+    runner = TCROSearchRunner(
+        component_library=_library(),
+        search_space=space,
+        pipeline_client=TelemetryFakePipeline(),
+        workload_path=tmp_path / "workload.json",
+        out_dir=tmp_path / "tcro_latent",
+        steps=1,
+        samples_per_step=1,
+        concurrency=1,
+        config=TCROConfig(initial_temperature=0.0, rack_activation_threshold=0.5),
+    )
+    state = runner._initial_state()
+    inactive = runner._sample_candidate(state, step=0, sample=0)
+    inactive_report = CandidateRepairer(_library(), space).repair_and_validate(inactive.chromosome)
+    inactive_export = HardwareTopologyExporter(_library()).export(inactive_report.chromosome)
+
+    assert inactive_report.feasible
+    assert "latent-mem" not in [group["id"] for group in inactive_export.hardware_topology["hierarchy"]["groups"]]
+
+    latent = state.rack_state("latent-mem")
+    assert latent is not None
+    latent.active_alpha = 1.0
+    latent.count_alpha["memory"] = 1.0
+    latent.link_alpha["memory"] = 1.0
+    active = runner._sample_candidate(state, step=0, sample=0)
+    active_report = CandidateRepairer(_library(), space).repair_and_validate(active.chromosome)
+    active_export = HardwareTopologyExporter(_library()).export(active_report.chromosome)
+
+    assert active_report.feasible
+    assert "latent-mem" in [group["id"] for group in active_export.hardware_topology["hierarchy"]["groups"]]
+    assert any(node["id"].startswith("latent-mem_mem") for node in active_export.hardware_topology["nodes"])
 
 
 def test_tcro_run_updates_state_from_telemetry_and_writes_artifacts(tmp_path: Path) -> None:

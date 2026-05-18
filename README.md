@@ -118,12 +118,13 @@ as pseudo-gradients to update node-type logits and link alpha values:
 
 ```bash
 codesign-opt tcro \
-  --catalog ./examples/component_catalog.json \
-  --space ./examples/search_space.json \
+  --catalog ./examples/component_catalog_tcro_latent_rack.json \
+  --space ./examples/search_space_tcro_latent_rack.json \
   --workload ../mapper/examples/cg_iteration_workload.json \
   --steps 8 \
   --samples-per-step 4 \
   --concurrency 2 \
+  --rack-activation-threshold 0.5 \
   --out ./artifacts/tcro_run
 ```
 
@@ -133,6 +134,13 @@ TCRO writes `step_*/sample_*` artifacts plus `supernet_state.json`,
 hardware graphs; the continuous relaxation is optimizer-internal. TCRO v1
 initializes from the first template in the search space, so use a single
 starting template when running focused continuous relaxation experiments.
+
+TCRO search spaces may include latent rack slots by setting a rack to
+`"optional": true`, `"active": false`, and a small `activation_alpha`. Inactive
+optional racks are kept in the continuous supernet but are omitted from exported
+`hardware_topology.v2` until their `active_alpha` crosses the activation
+threshold. This lets TCRO grow extra compute, memory, or hybrid racks without
+changing the mapper/simulator interface.
 
 ## Key Design Notes
 

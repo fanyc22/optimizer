@@ -127,6 +127,8 @@ def tcro_optimizer(
     temperature_decay: float = typer.Option(0.92, min=0.000001, max=1.0, help="Temperature decay per step."),
     min_temperature: float = typer.Option(0.05, min=0.0, help="Lower bound for sampling temperature."),
     link_prune_threshold: float = typer.Option(0.25, min=0.0, help="Inter-rack alpha below this value is pruned."),
+    rack_activation_threshold: float = typer.Option(0.5, min=0.0, help="Optional rack active_alpha threshold."),
+    latent_rack_initial_alpha: float = typer.Option(0.2, min=0.0, help="Default initial alpha for inactive optional rack slots."),
     checkpoint_interval: int = typer.Option(1, min=1, help="Write supernet_state.json every N steps."),
     out: Path = typer.Option(Path("artifacts/tcro_run"), help="TCRO output directory."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
@@ -152,6 +154,8 @@ def tcro_optimizer(
             temperature_decay=temperature_decay,
             min_temperature=min_temperature,
             link_prune_threshold=link_prune_threshold,
+            rack_activation_threshold=rack_activation_threshold,
+            latent_rack_initial_alpha=latent_rack_initial_alpha,
             checkpoint_interval=checkpoint_interval,
         ),
     )

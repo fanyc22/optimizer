@@ -26,6 +26,7 @@ class HardwareTopologyExporter:
         self._library = component_library
 
     def export(self, chromosome: Chromosome, *, iteration: int = 0) -> ExportedHardware:
+        active_racks = [rack for rack in chromosome.racks if _rack_is_active(rack)]
         nodes: list[dict[str, Any]] = []
         links: list[dict[str, Any]] = []
         groups: list[dict[str, Any]] = [
@@ -33,7 +34,7 @@ class HardwareTopologyExporter:
                 "id": "cluster0",
                 "level": "L4",
                 "type": "SuperPOD",
-                "children": [rack.rack_id for rack in chromosome.racks],
+                "children": [rack.rack_id for rack in active_racks],
             }
         ]
         proposal_nodes: list[InstantiatedNode] = []
@@ -43,7 +44,7 @@ class HardwareTopologyExporter:
         memory_provider: dict[str, str] | None = None
 
         rack_switches: list[str] = []
-        for rack in chromosome.racks:
+        for rack in active_racks:
             rack_children: list[str] = []
             switch_ids = self._add_switches(rack, nodes, proposal_nodes, rack_children)
             rack_switches.extend(switch_ids[:1])
@@ -492,3 +493,7 @@ def estimate_link_cost(link: InstantiatedLink, link_types: dict[str, LinkTypeSpe
 
 def node_role(type_name: str, spec: NodeTypeSpec) -> str:
     return role_of_type(type_name, spec.role)
+
+
+def _rack_is_active(rack: RackGene) -> bool:
+    return rack.active or not rack.optional

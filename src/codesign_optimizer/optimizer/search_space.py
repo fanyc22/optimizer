@@ -80,6 +80,9 @@ class RackCapacityLimits(BaseModel):
 class RackSpec(BaseModel):
     rack_id: str
     role: RackRole | None = None
+    optional: bool = False
+    active: bool = True
+    activation_alpha: float | None = Field(default=None, ge=0)
     gpu_count: int = Field(default=0, ge=0)
     cpu_count: int = Field(default=0, ge=0)
     memory_pool_count: int = Field(default=0, ge=0)
@@ -103,8 +106,13 @@ class RackSpec(BaseModel):
     def validate_rack(self) -> "RackSpec":
         compute_count = self.gpu_count + self.cpu_count
         if compute_count + self.memory_pool_count <= 0:
-            raise ValueError(f"rack {self.rack_id} must contain compute or memory nodes")
-        if self.fabric == "switch" and self.switch_count <= 0:
+            if not self.optional:
+                raise ValueError(f"rack {self.rack_id} must contain compute or memory nodes")
+            if self.role is None:
+                raise ValueError(f"optional empty rack {self.rack_id} must set role")
+            if self.active:
+                raise ValueError(f"optional empty rack {self.rack_id} must set active=false")
+        if self.fabric == "switch" and self.switch_count <= 0 and self.active:
             raise ValueError(f"rack {self.rack_id} uses switch fabric but switch_count is 0")
         if self.role is None:
             if compute_count > 0 and self.memory_pool_count > 0:
@@ -152,8 +160,13 @@ class RackTemplate(BaseModel):
             rack_ids = [rack.rack_id for rack in self.racks]
             if len(set(rack_ids)) != len(rack_ids):
                 raise ValueError(f"template {self.name} has duplicate rack_id")
-            if not any(rack.gpu_count + rack.cpu_count > 0 for rack in self.racks):
-                raise ValueError(f"template {self.name} must contain at least one compute rack")
+            active_compute_racks = [
+                rack
+                for rack in self.racks
+                if (rack.active or not rack.optional) and rack.gpu_count + rack.cpu_count > 0
+            ]
+            if not active_compute_racks:
+                raise ValueError(f"template {self.name} must contain at least one active compute rack")
             if self.inter_rack != "none" and not (
                 self.inter_rack_link_type or self.endpoint_link_type or self.racks[0].endpoint_link_type
             ):

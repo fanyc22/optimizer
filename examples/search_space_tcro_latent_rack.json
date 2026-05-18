@@ -1,0 +1,236 @@
+{
+  "seed": 2601,
+  "templates": [
+    {
+      "name": "tcro_16gpu_16cpu_with_latent_racks",
+      "racks": [
+        {
+          "rack_id": "gpu-rack0",
+          "role": "compute",
+          "gpu_count": 8,
+          "cpu_count": 0,
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "gpu_type": "GPU_BALANCED_80TF_80GB",
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "endpoint_link_type": "GPU_FABRIC_200G",
+          "gpu_link_type": "GPU_FABRIC_200G",
+          "fabric": "switch",
+          "limits": {
+            "max_gpu_count": 10,
+            "max_cpu_count": 0,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 16,
+            "max_power_watts": 9000
+          }
+        },
+        {
+          "rack_id": "gpu-rack1",
+          "role": "compute",
+          "gpu_count": 8,
+          "cpu_count": 0,
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "gpu_type": "GPU_BALANCED_80TF_80GB",
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "endpoint_link_type": "GPU_FABRIC_200G",
+          "gpu_link_type": "GPU_FABRIC_200G",
+          "fabric": "switch",
+          "limits": {
+            "max_gpu_count": 10,
+            "max_cpu_count": 0,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 16,
+            "max_power_watts": 9000
+          }
+        },
+        {
+          "rack_id": "cpu-rack0",
+          "role": "compute",
+          "gpu_count": 0,
+          "cpu_count": 16,
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "cpu_type": "CPU_HIGH_BW_96C",
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "endpoint_link_type": "CPU_PCIE_64G",
+          "cpu_link_type": "CPU_PCIE_64G",
+          "fabric": "switch",
+          "limits": {
+            "max_gpu_count": 0,
+            "max_cpu_count": 18,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 24,
+            "max_power_watts": 8500
+          }
+        },
+        {
+          "rack_id": "mem-rack0",
+          "role": "memory",
+          "gpu_count": 0,
+          "cpu_count": 0,
+          "memory_pool_count": 2,
+          "switch_count": 1,
+          "memory_pool_type": "CXL_MEMORY_POOL_2TB",
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "endpoint_link_type": "CXL_MEM_128G",
+          "memory_link_type": "CXL_MEM_128G",
+          "memory_link_qty": 1,
+          "fabric": "switch",
+          "limits": {
+            "max_gpu_count": 0,
+            "max_cpu_count": 0,
+            "max_memory_pool_count": 5,
+            "max_switch_count": 1,
+            "max_rack_units": 10,
+            "max_power_watts": 2500
+          }
+        },
+        {
+          "rack_id": "latent-gpu-rack0",
+          "role": "compute",
+          "optional": true,
+          "active": false,
+          "activation_alpha": 0.2,
+          "gpu_count": 0,
+          "cpu_count": 0,
+          "memory_pool_count": 0,
+          "switch_count": 0,
+          "gpu_type": "GPU_VALUE_45TF_48GB",
+          "switch_type": "LOW_COST_RACK_SWITCH_64",
+          "endpoint_link_type": "GPU_PCIE_128G",
+          "gpu_link_type": "GPU_PCIE_128G",
+          "fabric": "switch",
+          "limits": {
+            "max_gpu_count": 8,
+            "max_cpu_count": 0,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 12,
+            "max_power_watts": 6000
+          }
+        },
+        {
+          "rack_id": "latent-cpu-rack0",
+          "role": "compute",
+          "optional": true,
+          "active": false,
+          "activation_alpha": 0.2,
+          "gpu_count": 0,
+          "cpu_count": 0,
+          "memory_pool_count": 0,
+          "switch_count": 0,
+          "cpu_type": "CPU_EFFICIENT_128C",
+          "switch_type": "LOW_COST_RACK_SWITCH_64",
+          "endpoint_link_type": "CPU_PCIE_64G",
+          "cpu_link_type": "CPU_PCIE_64G",
+          "fabric": "switch",
+          "limits": {
+            "max_gpu_count": 0,
+            "max_cpu_count": 8,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 12,
+            "max_power_watts": 4500
+          }
+        },
+        {
+          "rack_id": "latent-mem-rack0",
+          "role": "memory",
+          "optional": true,
+          "active": false,
+          "activation_alpha": 0.2,
+          "gpu_count": 0,
+          "cpu_count": 0,
+          "memory_pool_count": 0,
+          "switch_count": 0,
+          "memory_pool_type": "CXL_MEMORY_POOL_4TB",
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "endpoint_link_type": "CXL_MEM_256G",
+          "memory_link_type": "CXL_MEM_256G",
+          "fabric": "switch",
+          "limits": {
+            "max_gpu_count": 0,
+            "max_cpu_count": 0,
+            "max_memory_pool_count": 4,
+            "max_switch_count": 1,
+            "max_rack_units": 12,
+            "max_power_watts": 3500
+          }
+        },
+        {
+          "rack_id": "latent-hybrid-rack0",
+          "role": "hybrid",
+          "optional": true,
+          "active": false,
+          "activation_alpha": 0.15,
+          "gpu_count": 0,
+          "cpu_count": 0,
+          "memory_pool_count": 0,
+          "switch_count": 0,
+          "gpu_type": "GPU_VALUE_45TF_48GB",
+          "cpu_type": "CPU_STANDARD_64C",
+          "memory_pool_type": "CXL_MEMORY_POOL_2TB",
+          "switch_type": "LOW_COST_RACK_SWITCH_64",
+          "endpoint_link_type": "GPU_PCIE_128G",
+          "gpu_link_type": "GPU_PCIE_128G",
+          "cpu_link_type": "CPU_PCIE_64G",
+          "memory_link_type": "CXL_MEM_128G",
+          "fabric": "switch",
+          "limits": {
+            "max_gpu_count": 4,
+            "max_cpu_count": 4,
+            "max_memory_pool_count": 2,
+            "max_switch_count": 1,
+            "max_rack_units": 12,
+            "max_power_watts": 6500
+          }
+        }
+      ],
+      "inter_rack": "ring",
+      "inter_rack_link_type": "OPTICAL_400G",
+      "inter_rack_link_qty": 1
+    }
+  ],
+  "mutation": {
+    "min_gpu_per_rack": 0,
+    "max_gpu_per_rack": 10,
+    "min_cpu_per_rack": 0,
+    "max_cpu_per_rack": 18,
+    "min_memory_pools_per_rack": 0,
+    "max_memory_pools_per_rack": 5,
+    "min_endpoint_link_qty": 1,
+    "max_endpoint_link_qty": 3,
+    "min_inter_rack_link_qty": 1,
+    "max_inter_rack_link_qty": 4,
+    "mutation_rate": 0.35,
+    "bottleneck_mutation_rate": 0.45,
+    "elite_fraction": 0.25
+  },
+  "limits": {
+    "max_total_cost": 1250000,
+    "max_peak_power_watts": 34000,
+    "max_rack_power_watts": 22000,
+    "max_rack_units": 42
+  },
+  "objective_weights": {
+    "makespan": 1.0,
+    "cost": 0.15,
+    "power": 0.15,
+    "max_link_utilization": 0.30,
+    "max_queue_delay": 0.25,
+    "remote_memory_contention": 0.25
+  },
+  "evaluation": {
+    "mapper": "heft",
+    "parallel": "none",
+    "topology_format": "hardware",
+    "sim_extra": [],
+    "mapper_extra": [],
+    "scaling_report": false,
+    "timeout_seconds": 7200
+  }
+}

@@ -84,6 +84,14 @@ class CandidateRepairer:
     def _repair_rack(self, rack: RackGene, messages: list[str]) -> None:
         settings = self._space.mutation
         original = rack.model_copy(deep=True)
+        if rack.optional and not rack.active:
+            rack.gpu_count = 0
+            rack.cpu_count = 0
+            rack.memory_pool_count = 0
+            rack.switch_count = 0
+            if rack.model_dump() != original.model_dump():
+                messages.append(f"deactivated optional rack {rack.rack_id}")
+            return
         if rack.role == "memory":
             rack.gpu_count = 0
             rack.cpu_count = 0
@@ -193,6 +201,8 @@ class CandidateRepairer:
         messages: list[str],
     ) -> tuple[bool, float]:
         for rack in chromosome.racks:
+            if rack.optional and not rack.active:
+                continue
             if rack.gpu_count + rack.cpu_count + rack.memory_pool_count <= 0:
                 feasible = False
                 penalty += 100_000.0
@@ -266,6 +276,8 @@ class CandidateRepairer:
         messages: list[str],
     ) -> tuple[bool, float]:
         for rack in chromosome.racks:
+            if rack.optional and not rack.active:
+                continue
             if rack.fabric != "switch" or not rack.switch_type:
                 continue
             switch_spec = self._library.node_types[rack.switch_type]
@@ -329,12 +341,13 @@ class CandidateRepairer:
         return min(global_maximum, rack_limit)
 
     def _inter_rack_degree(self, chromosome: Chromosome, rack_id: str) -> int:
-        if chromosome.inter_rack == "none" or len(chromosome.racks) <= 1:
+        active_racks = [rack for rack in chromosome.racks if rack.active or not rack.optional]
+        if chromosome.inter_rack == "none" or len(active_racks) <= 1:
             return 0
         if chromosome.inter_rack == "fully_connected":
-            return len(chromosome.racks) - 1
+            return len(active_racks) - 1
         if chromosome.inter_rack == "ring":
-            return 1 if len(chromosome.racks) == 2 else 2
+            return 1 if len(active_racks) == 2 else 2
         return 0
 
     def _rack_type_counts(self, rack: RackGene) -> list[tuple[str, int]]:

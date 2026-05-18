@@ -18,6 +18,9 @@ from codesign_optimizer.optimizer.search_space import (
 class RackGene(BaseModel):
     rack_id: str
     role: str = "compute"
+    optional: bool = False
+    active: bool = True
+    activation_alpha: float | None = Field(default=None, ge=0)
     gpu_count: int = Field(ge=0)
     cpu_count: int = Field(ge=0)
     memory_pool_count: int = Field(ge=0)
@@ -149,6 +152,8 @@ def chromosome_from_template(template: RackTemplate) -> Chromosome:
                     template.cpu_count,
                     template.memory_pool_count,
                 ),
+                optional=False,
+                active=True,
                 gpu_count=template.gpu_count,
                 cpu_count=template.cpu_count,
                 memory_pool_count=template.memory_pool_count,
@@ -267,9 +272,11 @@ def mutate_random(
             )
         elif op == "inter_mode":
             result.inter_rack = rng.choice(["none", "ring", "fully_connected"])
+        elif op == "active":
+            rack.active = not rack.active
 
         _repair_role_minimums(rack, space)
-        if rack.fabric == "switch" and rack.switch_count == 0:
+        if rack.active and rack.fabric == "switch" and rack.switch_count == 0:
             rack.switch_count = 1
     return result
 
@@ -302,6 +309,9 @@ def _rack_gene_from_spec(rack: RackSpec) -> RackGene:
     return RackGene(
         rack_id=rack.rack_id,
         role=rack.role or _infer_rack_role(rack.gpu_count, rack.cpu_count, rack.memory_pool_count),
+        optional=rack.optional,
+        active=rack.active,
+        activation_alpha=rack.activation_alpha,
         gpu_count=rack.gpu_count,
         cpu_count=rack.cpu_count,
         memory_pool_count=rack.memory_pool_count,
@@ -339,7 +349,11 @@ def _require_endpoint_link_type(template: RackTemplate) -> str:
 
 
 def _mutation_ops_for_rack(rack: RackGene) -> list[str]:
+    if rack.optional and not rack.active:
+        return ["active"]
     ops = ["endpoint_qty", "inter_qty", "inter_mode"]
+    if rack.optional:
+        ops.append("active")
     if rack.role in {"compute", "hybrid"}:
         if rack.gpu_type:
             ops.append("gpu_count")
@@ -351,6 +365,8 @@ def _mutation_ops_for_rack(rack: RackGene) -> list[str]:
 
 
 def _repair_role_minimums(rack: RackGene, space: SearchSpace) -> None:
+    if rack.optional and not rack.active:
+        return
     settings = space.mutation
     if rack.role == "memory":
         rack.gpu_count = 0

@@ -32,6 +32,8 @@ class TCROConfig(BaseModel):
     temperature_decay: float = Field(default=0.92, gt=0, le=1)
     noise_scale: float = Field(default=0.02, ge=0)
     link_prune_threshold: float = Field(default=0.25, ge=0)
+    rack_activation_threshold: float = Field(default=0.5, ge=0)
+    latent_rack_initial_alpha: float = Field(default=0.2, ge=0)
     constraint_penalty_weight: float = Field(default=1.0, ge=0)
     checkpoint_interval: int = Field(default=1, ge=1)
     telemetry_top_k: int = Field(default=1, ge=1)
@@ -40,6 +42,8 @@ class TCROConfig(BaseModel):
 class RackSupernetState(BaseModel):
     rack_id: str
     role: str
+    optional: bool = False
+    active_alpha: float = 1.0
     count_alpha: dict[str, float]
     link_alpha: dict[str, float]
     type_logits: dict[str, dict[str, float]]
@@ -218,6 +222,8 @@ class TCROSearchRunner:
                 RackSupernetState(
                     rack_id=rack.rack_id,
                     role=rack.role,
+                    optional=rack.optional,
+                    active_alpha=self._initial_active_alpha(rack),
                     count_alpha={
                         "gpu": float(rack.gpu_count),
                         "cpu": float(rack.cpu_count),
@@ -328,6 +334,16 @@ class TCROSearchRunner:
         temperature: float,
         rng: random.Random,
     ) -> None:
+        rack.optional = rack_state.optional
+        rack.activation_alpha = rack_state.active_alpha
+        rack.active = self._sample_rack_active(rack_state, temperature, rng)
+        if not rack.active:
+            rack.gpu_count = 0
+            rack.cpu_count = 0
+            rack.memory_pool_count = 0
+            rack.switch_count = 0
+            return
+
         rack.gpu_count = _quantize_count(
             rack_state.count_alpha.get("gpu", 0.0),
             self._count_min(rack, "gpu"),
@@ -524,28 +540,34 @@ class TCROSearchRunner:
         for rack_state in state.racks:
             rack_update: dict[str, float] = {}
             domain_hit = rack_state.rack_id in top_domain
+            activation_delta = 0.0
             if compute_util > 0.85:
                 rack_update["compute_pressure"] = compute_util - 0.85
                 self._nudge_high_perf(rack_state.type_logits.get("gpu", {}), "peak")
                 self._nudge_high_perf(rack_state.type_logits.get("cpu", {}), "peak")
                 if rack_state.role in {"compute", "hybrid"}:
-                    rack_state.count_alpha["gpu"] = rack_state.count_alpha.get("gpu", 0.0) + lr * 0.25 * (compute_util - 0.85)
+                    delta = lr * 0.25 * (compute_util - 0.85)
+                    rack_state.count_alpha["gpu"] = rack_state.count_alpha.get("gpu", 0.0) + delta
+                    activation_delta += delta
             if remote_pressure > 0 and rack_state.role in {"memory", "hybrid"}:
                 delta = lr * remote_pressure
                 rack_state.count_alpha["memory"] = rack_state.count_alpha.get("memory", 0.0) + delta
                 rack_state.link_alpha["memory"] = rack_state.link_alpha.get("memory", 1.0) + delta
                 self._nudge_high_perf(rack_state.type_logits.get("memory", {}), "memory")
                 rack_update["remote_memory_delta"] = delta
+                activation_delta += delta
             if network_util > 0.75 or queue_pressure > 0:
                 delta = lr * max(network_util - 0.75, queue_pressure)
                 if top_domain.startswith("cluster:") or not top_domain:
                     state.inter_rack_alpha += delta * 2.0
                     state.inter_rack_mode_logits["fully_connected"] = state.inter_rack_mode_logits.get("fully_connected", 0.0) + delta
                     rack_update["cluster_link_delta"] = delta * 2.0
+                    activation_delta += delta * 0.5
                 if domain_hit:
                     for key in ("endpoint", "gpu", "cpu", "memory"):
                         rack_state.link_alpha[key] = rack_state.link_alpha.get(key, 1.0) + delta
                     rack_update["rack_link_delta"] = delta
+                    activation_delta += delta * 0.5
             elif network_util < 0.10 and state.inter_rack_alpha > 0:
                 delta = lr * 0.10
                 state.inter_rack_alpha = max(0.0, state.inter_rack_alpha - delta)
@@ -561,6 +583,10 @@ class TCROSearchRunner:
                 self._nudge_low_cost_power(rack_state.type_logits.get("cpu", {}))
                 self._nudge_low_cost_power(rack_state.type_logits.get("memory", {}))
                 rack_update["constraint_delta"] = -delta
+                activation_delta -= delta * 0.25
+            if rack_state.optional:
+                rack_state.active_alpha = max(0.0, rack_state.active_alpha + activation_delta)
+                rack_update["active_alpha"] = rack_state.active_alpha
             gradient["rack_updates"][rack_state.rack_id] = rack_update
 
         if constraint_pressure > 0:
@@ -616,6 +642,7 @@ class TCROSearchRunner:
             for key in list(rack.link_alpha):
                 upper = self._space.mutation.max_endpoint_link_qty
                 rack.link_alpha[key] = max(0.0, min(float(upper), rack.link_alpha[key]))
+            rack.active_alpha = max(0.0, min(2.0, rack.active_alpha))
         _add_logit_noise(state.inter_rack_mode_logits, rng, noise_sigma)
         _add_logit_noise(state.inter_rack_link_type_logits, rng, noise_sigma)
         state.inter_rack_alpha = max(0.0, min(float(self._space.mutation.max_inter_rack_link_qty), state.inter_rack_alpha))
@@ -748,6 +775,27 @@ class TCROSearchRunner:
             maximum=self._space.mutation.max_endpoint_link_qty,
         )
         return max(1, qty)
+
+    def _initial_active_alpha(self, rack: RackGene) -> float:
+        if rack.activation_alpha is not None:
+            return rack.activation_alpha
+        if rack.optional and not rack.active:
+            return self._config.latent_rack_initial_alpha
+        return 1.0
+
+    def _sample_rack_active(
+        self,
+        rack_state: RackSupernetState,
+        temperature: float,
+        rng: random.Random,
+    ) -> bool:
+        if not rack_state.optional:
+            return True
+        if temperature <= 0:
+            return rack_state.active_alpha >= self._config.rack_activation_threshold
+        margin = rack_state.active_alpha - self._config.rack_activation_threshold
+        noise = rng.gauss(0.0, max(1e-9, temperature * 0.10))
+        return margin + noise >= 0.0
 
     def _count_min(self, rack: RackGene, kind: str) -> int:
         settings = self._space.mutation
