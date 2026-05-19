@@ -14,6 +14,7 @@ from codesign_optimizer.optimizer.orchestrator import CoDesignOrchestrator
 from codesign_optimizer.optimizer.pipeline_client import MapperSimulatorPipelineClient
 from codesign_optimizer.optimizer.search_space import SearchSpace, load_component_library
 from codesign_optimizer.optimizer.tcro import TCROConfig, TCROSearchRunner
+from codesign_optimizer.optimizer.tgrl import TGRLConfig, TGRLSearchRunner
 from codesign_optimizer.simulator.file_adapter import FileBackedSimulatorClient
 from codesign_optimizer.utils.logging import configure_logging
 
@@ -166,6 +167,65 @@ def tcro_optimizer(
         f"Samples per step: {samples_per_step}\n"
         f"Concurrency: {concurrency}\n"
         f"Evaluations: {len(result.history)}\n"
+        f"Best score: {result.best.weighted_score:.4f}\n"
+        f"Best feasible: {result.best.feasible}\n"
+        f"Artifacts: {out}"
+    )
+
+
+@app.command("tgrl")
+def tgrl_optimizer(
+    catalog: Path = typer.Option(..., exists=True, readable=True, help="Component catalog JSON/JSONC."),
+    space: Path = typer.Option(..., exists=True, readable=True, help="TG-RL search-space JSON/JSONC."),
+    workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
+    episodes: int = typer.Option(20, min=1, max=10000, help="Number of TG-RL episodes."),
+    steps_per_episode: int = typer.Option(8, min=1, max=10000, help="Graph edit steps per episode."),
+    mode: str = typer.Option("v0", help="TG-RL mode: v0 uses heuristic prior only, v1 adds a learnable linear policy."),
+    concurrency: int = typer.Option(1, min=1, max=1024, help="Candidate graph edits evaluated concurrently per step."),
+    temperature: float = typer.Option(1.0, min=0.000001, help="Softmax sampling temperature."),
+    heuristic_weight: float = typer.Option(1.0, min=0.0, help="Weight of telemetry heuristic prior in policy logits."),
+    learning_rate: float = typer.Option(0.05, min=0.0, help="Linear policy learning rate for mode=v1."),
+    kl_weight: float = typer.Option(0.05, min=0.0, help="Prior KL-style pull for mode=v1 policy updates."),
+    greedy: bool = typer.Option(False, help="Choose top-probability actions instead of sampling."),
+    out: Path = typer.Option(Path("artifacts/tgrl_run"), help="TG-RL output directory."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
+) -> None:
+    configure_logging(verbose=verbose)
+    if mode not in {"v0", "v1"}:
+        console.print("[red]--mode must be one of: v0, v1[/red]")
+        raise typer.Exit(code=2)
+
+    component_library = load_component_library(load_jsonc(catalog))
+    search_space = SearchSpace.model_validate(load_jsonc(space))
+    repo_root = search_space.evaluation.repo_root or _default_repo_root()
+    pipeline = MapperSimulatorPipelineClient(repo_root=repo_root, evaluation=search_space.evaluation)
+    runner = TGRLSearchRunner(
+        component_library=component_library,
+        search_space=search_space,
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=out,
+        episodes=episodes,
+        steps_per_episode=steps_per_episode,
+        concurrency=concurrency,
+        config=TGRLConfig(
+            mode=mode,  # type: ignore[arg-type]
+            temperature=temperature,
+            heuristic_weight=heuristic_weight,
+            learning_rate=learning_rate,
+            kl_weight=kl_weight,
+            greedy=greedy,
+        ),
+    )
+    result = runner.run()
+    console.print(
+        "[green]TG-RL search completed[/green]\n"
+        f"Mode: {mode}\n"
+        f"Episodes: {episodes}\n"
+        f"Steps per episode: {steps_per_episode}\n"
+        f"Concurrency: {concurrency}\n"
+        f"Evaluations: {len(result.history)}\n"
+        f"Trajectory items: {len(result.trajectory)}\n"
         f"Best score: {result.best.weighted_score:.4f}\n"
         f"Best feasible: {result.best.feasible}\n"
         f"Artifacts: {out}"

@@ -142,6 +142,31 @@ optional racks are kept in the continuous supernet but are omitted from exported
 threshold. This lets TCRO grow extra compute, memory, or hybrid racks without
 changing the mapper/simulator interface.
 
+## TG-RL Masked Graph-Edit Search
+
+TG-RL keeps the candidate hardware discrete. Each step enumerates legal
+rack-level graph edits, masks out edits that fail existing repair/export
+constraints, scores the remaining edits with simulator telemetry priors, and
+evaluates one or more sampled candidates:
+
+```bash
+codesign-opt tgrl \
+  --catalog ./examples/component_catalog_tcro_latent_rack.json \
+  --space ./examples/search_space_tcro_latent_rack.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --episodes 20 \
+  --steps-per-episode 8 \
+  --mode v0 \
+  --concurrency 2 \
+  --out ./artifacts/tgrl_run
+```
+
+`--mode v0` uses the telemetry heuristic prior directly. `--mode v1` adds a
+small pure-Python linear policy over graph-edit features and updates it from
+trajectory rewards with a KL-style pull toward the heuristic prior. TG-RL writes
+`episode_*/step_*` artifacts plus `trajectory.jsonl`, `policy_state.json`,
+`tgrl_summary.json`, `best_proposal.json`, and `best_hardware_topology.json`.
+
 ## Key Design Notes
 
 - The sample simulator files are **JSONC** (comments included), so parser supports inline `// ...` comments.
