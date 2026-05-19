@@ -30,6 +30,13 @@ src/codesign_optimizer/optimizer/outer_loop.py
 src/codesign_optimizer/optimizer/pipeline_client.py
 src/codesign_optimizer/optimizer/repair.py
 src/codesign_optimizer/optimizer/search_space.py
+src/codesign_optimizer/optimizer/tcro.py
+src/codesign_optimizer/optimizer/tgrl.py
+src/codesign_optimizer/optimizer/tgrl_v2/__init__.py
+src/codesign_optimizer/optimizer/tgrl_v2/model.py
+src/codesign_optimizer/optimizer/tgrl_v2/observation.py
+src/codesign_optimizer/optimizer/tgrl_v2/ppo.py
+src/codesign_optimizer/optimizer/tgrl_v2/trainer.py
 src/codesign_optimizer/simulator/__init__.py
 src/codesign_optimizer/simulator/file_adapter.py
 src/codesign_optimizer/simulator/interface.py
@@ -41,3 +48,6 @@ tests/test_heuristic_exporter.py
 tests/test_heuristic_search.py
 tests/test_jsonc.py
 tests/test_objective.py
+tests/test_tcro.py
+tests/test_tgrl.py
+tests/test_tgrl_v2.py

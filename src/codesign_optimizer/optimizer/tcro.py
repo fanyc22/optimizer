@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 import math
 import random
 import threading
@@ -23,6 +24,9 @@ from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback
 from codesign_optimizer.optimizer.pipeline_client import PipelineClient
 from codesign_optimizer.optimizer.repair import CandidateRepairer, RepairReport
 from codesign_optimizer.optimizer.search_space import SearchObjectiveWeights, SearchSpace
+
+
+logger = logging.getLogger(__name__)
 
 
 class TCROConfig(BaseModel):
@@ -191,8 +195,23 @@ class TCROSearchRunner:
         history: list[TCROCandidateEvaluation] = []
         telemetry_history: list[dict[str, Any]] = []
         best: TCROCandidateEvaluation | None = None
+        logger.info(
+            "Starting TCRO search: steps=%d samples_per_step=%d concurrency=%d template=%s out=%s",
+            self._steps,
+            self._samples_per_step,
+            self._concurrency,
+            state.template_name,
+            self._out_dir,
+        )
 
         for step in range(self._steps):
+            logger.info(
+                "TCRO step %d/%d: sampling %d candidates temperature=%.4f",
+                step + 1,
+                self._steps,
+                self._samples_per_step,
+                state.temperature,
+            )
             evaluated = self._evaluate_step(state, step)
             history.extend(evaluated)
             step_best = min(evaluated, key=lambda item: item.weighted_score)
@@ -201,6 +220,16 @@ class TCROSearchRunner:
             pseudo_gradient = self._apply_pseudo_gradient(state, step_best)
             step_summary = self._persist_step(step, state, evaluated, step_best, pseudo_gradient)
             telemetry_history.append(step_summary)
+            logger.info(
+                "TCRO step %d/%d complete: best_sample=%d best_score=%.4f feasible=%s cache_hits=%d next_temperature=%.4f",
+                step + 1,
+                self._steps,
+                step_best.sample,
+                step_best.weighted_score,
+                step_best.feasible,
+                sum(1 for item in evaluated if item.cache_hit),
+                state.temperature,
+            )
             if (step + 1) % self._config.checkpoint_interval == 0:
                 dump_json(self._out_dir / "supernet_state.json", state.model_dump(mode="json"))
 
@@ -209,6 +238,13 @@ class TCROSearchRunner:
         dump_json(self._out_dir / "supernet_state.json", state.model_dump(mode="json"))
         dump_json(self._out_dir / "telemetry_history.json", {"steps": telemetry_history})
         self._persist_final(history, best, state)
+        logger.info(
+            "TCRO search finished: evaluations=%d best_score=%.4f feasible=%s final_temperature=%.4f",
+            len(history),
+            best.weighted_score,
+            best.feasible,
+            state.temperature,
+        )
         return TCROSearchResult(history=history, best=best, final_state=state)
 
     def _initial_state(self) -> SupernetState:
@@ -446,6 +482,16 @@ class TCROSearchRunner:
                 estimated_power_watts=repair.estimated_power_watts,
                 penalty=repair.penalty + 1_000_000.0,
             )
+        logger.info(
+            "TCRO candidate step=%03d sample=%03d prepared: ranks=%s racks=%d cost=%.2f power=%.2f feasible=%s",
+            candidate.step,
+            candidate.sample,
+            exported.rank_count if exported is not None else "n/a",
+            _active_rack_count(chromosome),
+            repair.estimated_cost,
+            repair.estimated_power_watts,
+            repair.feasible and exported is not None,
+        )
 
         if cached is not None:
             copied = TCROCandidateEvaluation(
@@ -464,17 +510,37 @@ class TCROSearchRunner:
             dump_json(candidate_dir / "score.json", copied.to_summary())
             if copied.feedback is not None:
                 dump_json(candidate_dir / "feedback.json", _feedback_to_dict(copied.feedback))
+            logger.info(
+                "TCRO candidate step=%03d sample=%03d cache hit: score=%.4f feasible=%s",
+                candidate.step,
+                candidate.sample,
+                copied.weighted_score,
+                copied.feasible,
+            )
             return copied
 
         if not repair.feasible or exported is None:
             evaluation = self._penalty_evaluation(candidate, repair, exported, repair.messages)
             dump_json(candidate_dir / "score.json", evaluation.to_summary())
             self._store_cached_evaluation(signature, evaluation)
+            logger.info(
+                "TCRO candidate step=%03d sample=%03d skipped with penalty: score=%.4f reason=%s",
+                candidate.step,
+                candidate.sample,
+                evaluation.weighted_score,
+                _message_preview(evaluation.messages),
+            )
             return evaluation
 
         feedback: ParsedPipelineFeedback | None = None
         messages = list(repair.messages)
         feasible = True
+        logger.info(
+            "TCRO candidate step=%03d sample=%03d running mapper/simulator: topology=%s",
+            candidate.step,
+            candidate.sample,
+            candidate_dir / "hardware_topology.json",
+        )
         try:
             feedback = self._pipeline.run(
                 topology_path=candidate_dir / "hardware_topology.json",
@@ -505,6 +571,17 @@ class TCROSearchRunner:
         if feedback is not None:
             dump_json(candidate_dir / "feedback.json", _feedback_to_dict(feedback))
         self._store_cached_evaluation(signature, evaluation)
+        logger.info(
+            "TCRO candidate step=%03d sample=%03d done: score=%.4f feasible=%s makespan_us=%.3f max_link_util=%.3f queue_ns=%.3f remote_ns=%.3f",
+            candidate.step,
+            candidate.sample,
+            evaluation.weighted_score,
+            evaluation.feasible,
+            evaluation.objectives[0],
+            evaluation.objectives[3],
+            evaluation.objectives[4],
+            evaluation.objectives[5],
+        )
         return evaluation
 
     def _apply_pseudo_gradient(
@@ -907,3 +984,16 @@ def _feedback_to_dict(feedback: ParsedPipelineFeedback) -> dict[str, Any]:
         "compute_comm_overlap_ns": feedback.compute_comm_overlap_ns,
         "simulator_stdout": str(feedback.simulator_stdout_path) if feedback.simulator_stdout_path else "",
     }
+
+
+def _active_rack_count(chromosome: Chromosome) -> int:
+    return sum(1 for rack in chromosome.racks if rack.active or not rack.optional)
+
+
+def _message_preview(messages: list[str]) -> str:
+    if not messages:
+        return "none"
+    text = "; ".join(messages[:2])
+    if len(messages) > 2:
+        text += "; ..."
+    return text

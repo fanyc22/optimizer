@@ -61,6 +61,7 @@ class EvaluationSettings(BaseModel):
     sim_extra: list[str] = Field(default_factory=list)
     mapper_extra: list[str] = Field(default_factory=list)
     scaling_report: bool = False
+    cleanup_wrapper_intermediate: bool = True
     timeout_seconds: int | None = Field(default=None, ge=1)
     repo_root: Path | None = None
 

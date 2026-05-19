@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import logging
 import math
 import random
 import threading
@@ -25,6 +26,9 @@ from codesign_optimizer.optimizer.pipeline_client import PipelineClient
 from codesign_optimizer.optimizer.repair import CandidateRepairer, RepairReport
 from codesign_optimizer.optimizer.search_space import SearchObjectiveWeights, SearchSpace
 from codesign_optimizer.optimizer.tcro import softmax
+
+
+logger = logging.getLogger(__name__)
 
 
 ActionType = Literal[
@@ -282,8 +286,17 @@ class TGRLSearchRunner:
         history: list[TGRLEvaluation] = []
         trajectory: list[TrajectoryItem] = []
         best: TGRLEvaluation | None = None
+        logger.info(
+            "Starting TG-RL search: mode=%s episodes=%d steps_per_episode=%d concurrency=%d out=%s",
+            self._config.mode,
+            self._episodes,
+            self._steps_per_episode,
+            self._concurrency,
+            self._out_dir,
+        )
 
         for episode in range(self._episodes):
+            logger.info("TG-RL episode %d/%d: evaluating initial proposal", episode + 1, self._episodes)
             current = self._initial_chromosome()
             current_eval = self._evaluate_initial(current, episode)
             previous_score = current_eval.weighted_score
@@ -291,6 +304,13 @@ class TGRLSearchRunner:
             history.append(current_eval)
             if best is None or current_eval.weighted_score < best.weighted_score:
                 best = current_eval
+            logger.info(
+                "TG-RL episode %d/%d initial: score=%.4f feasible=%s",
+                episode + 1,
+                self._episodes,
+                current_eval.weighted_score,
+                current_eval.feasible,
+            )
 
             episode_trajectory: list[TrajectoryItem] = []
             for step in range(self._steps_per_episode):
@@ -308,6 +328,13 @@ class TGRLSearchRunner:
                     config=self._config,
                 )
                 if not masked_actions:
+                    logger.info(
+                        "TG-RL episode %d/%d step %d/%d: no feasible actions, stopping episode",
+                        episode + 1,
+                        self._episodes,
+                        step + 1,
+                        self._steps_per_episode,
+                    )
                     break
 
                 sampled = sample_masked_actions(
@@ -315,6 +342,18 @@ class TGRLSearchRunner:
                     count=min(self._concurrency, len(masked_actions)),
                     rng=self._rng,
                     greedy=self._config.greedy,
+                )
+                logger.info(
+                    "TG-RL episode %d/%d step %d/%d: actions=%d sampled=%d context(compute=%.3f network=%.3f remote=%.3f)",
+                    episode + 1,
+                    self._episodes,
+                    step + 1,
+                    self._steps_per_episode,
+                    len(masked_actions),
+                    len(sampled),
+                    context.compute_utilization,
+                    context.network_utilization,
+                    context.remote_memory_pressure,
                 )
                 evaluations = self._evaluate_actions(sampled, episode, step)
                 history.extend(evaluations)
@@ -351,6 +390,17 @@ class TGRLSearchRunner:
                 previous_score = min(previous_score, step_best.weighted_score, reward_base)
                 last_feedback = step_best.feedback
                 self._persist_step(episode, step, step_best, evaluations)
+                logger.info(
+                    "TG-RL episode %d/%d step %d/%d complete: best_action=%s best_score=%.4f feasible=%s cache_hits=%d",
+                    episode + 1,
+                    self._episodes,
+                    step + 1,
+                    self._steps_per_episode,
+                    step_best.action.key,
+                    step_best.weighted_score,
+                    step_best.feasible,
+                    sum(1 for item in evaluations if item.cache_hit),
+                )
 
             if self._config.mode == "v1":
                 self._policy.update(
@@ -359,10 +409,23 @@ class TGRLSearchRunner:
                     kl_weight=self._config.kl_weight,
                 )
                 dump_json(self._out_dir / "policy_state.json", self._policy.to_dict())
+                logger.info(
+                    "TG-RL episode %d/%d: updated linear policy with %d trajectory items",
+                    episode + 1,
+                    self._episodes,
+                    len(episode_trajectory),
+                )
 
         if best is None:
             raise RuntimeError("TG-RL did not evaluate any candidate")
         self._persist_final(history, trajectory, best)
+        logger.info(
+            "TG-RL search finished: evaluations=%d trajectory_items=%d best_score=%.4f feasible=%s",
+            len(history),
+            len(trajectory),
+            best.weighted_score,
+            best.feasible,
+        )
         return TGRLSearchResult(
             history=history,
             trajectory=trajectory,
@@ -468,6 +531,18 @@ class TGRLSearchRunner:
                 estimated_power_watts=repair.estimated_power_watts,
                 penalty=repair.penalty + 1_000_000.0,
             )
+        logger.info(
+            "TG-RL candidate episode=%03d step=%03d idx=%03d action=%s prepared: ranks=%s racks=%d cost=%.2f power=%.2f feasible=%s",
+            episode,
+            step,
+            candidate_index,
+            masked_action.action.key,
+            exported.rank_count if exported is not None else "n/a",
+            _active_rack_count(chromosome),
+            repair.estimated_cost,
+            repair.estimated_power_watts,
+            repair.feasible and exported is not None,
+        )
 
         cached = self._cached_evaluation(signature)
         if cached is not None:
@@ -488,6 +563,14 @@ class TGRLSearchRunner:
             dump_json(candidate_dir / "score.json", copied.to_summary())
             if copied.feedback is not None:
                 dump_json(candidate_dir / "feedback.json", _feedback_to_dict(copied.feedback))
+            logger.info(
+                "TG-RL candidate episode=%03d step=%03d idx=%03d cache hit: score=%.4f feasible=%s",
+                episode,
+                step,
+                candidate_index,
+                copied.weighted_score,
+                copied.feasible,
+            )
             return copied
 
         if not repair.feasible or exported is None:
@@ -502,11 +585,26 @@ class TGRLSearchRunner:
             )
             dump_json(candidate_dir / "score.json", evaluation.to_summary())
             self._store_cached_evaluation(signature, evaluation)
+            logger.info(
+                "TG-RL candidate episode=%03d step=%03d idx=%03d skipped with penalty: score=%.4f reason=%s",
+                episode,
+                step,
+                candidate_index,
+                evaluation.weighted_score,
+                _message_preview(evaluation.messages),
+            )
             return evaluation
 
         feedback: ParsedPipelineFeedback | None = None
         messages = list(repair.messages)
         feasible = True
+        logger.info(
+            "TG-RL candidate episode=%03d step=%03d idx=%03d running mapper/simulator: topology=%s",
+            episode,
+            step,
+            candidate_index,
+            candidate_dir / "hardware_topology.json",
+        )
         try:
             feedback = self._pipeline.run(
                 topology_path=candidate_dir / "hardware_topology.json",
@@ -538,6 +636,18 @@ class TGRLSearchRunner:
         if feedback is not None:
             dump_json(candidate_dir / "feedback.json", _feedback_to_dict(feedback))
         self._store_cached_evaluation(signature, evaluation)
+        logger.info(
+            "TG-RL candidate episode=%03d step=%03d idx=%03d done: score=%.4f feasible=%s makespan_us=%.3f max_link_util=%.3f queue_ns=%.3f remote_ns=%.3f",
+            episode,
+            step,
+            candidate_index,
+            evaluation.weighted_score,
+            evaluation.feasible,
+            evaluation.objectives[0],
+            evaluation.objectives[3],
+            evaluation.objectives[4],
+            evaluation.objectives[5],
+        )
         return evaluation
 
     def _penalty_evaluation(
@@ -1131,3 +1241,16 @@ def _feedback_to_dict(feedback: ParsedPipelineFeedback) -> dict[str, Any]:
         "compute_comm_overlap_ns": feedback.compute_comm_overlap_ns,
         "simulator_stdout": str(feedback.simulator_stdout_path) if feedback.simulator_stdout_path else "",
     }
+
+
+def _active_rack_count(chromosome: Chromosome) -> int:
+    return sum(1 for rack in chromosome.racks if rack.active or not rack.optional)
+
+
+def _message_preview(messages: list[str]) -> str:
+    if not messages:
+        return "none"
+    text = "; ".join(messages[:2])
+    if len(messages) > 2:
+        text += "; ..."
+    return text

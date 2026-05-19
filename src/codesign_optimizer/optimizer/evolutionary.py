@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 import math
 import random
 import threading
@@ -21,6 +22,9 @@ from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback
 from codesign_optimizer.optimizer.pipeline_client import PipelineClient
 from codesign_optimizer.optimizer.repair import CandidateRepairer, RepairReport
 from codesign_optimizer.optimizer.search_space import SearchObjectiveWeights, SearchSpace
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -99,15 +103,45 @@ class HeuristicSearchRunner:
         self._out_dir.mkdir(parents=True, exist_ok=True)
         population = initial_population(self._space, self._population_size, self._rng)
         history: list[CandidateEvaluation] = []
+        logger.info(
+            "Starting heuristic search: generations=%d population=%d concurrency=%d templates=%d out=%s",
+            self._generations,
+            self._population_size,
+            self._concurrency,
+            len(self._space.templates),
+            self._out_dir,
+        )
 
         for generation in range(self._generations):
+            logger.info(
+                "Generation %d/%d: evaluating %d candidates",
+                generation + 1,
+                self._generations,
+                len(population),
+            )
             evaluated = self._evaluate_generation(population, generation)
             rank_fronts(evaluated)
             history.extend(evaluated)
             self._persist_generation(generation, evaluated)
+            generation_best = min(evaluated, key=lambda item: item.weighted_score)
+            logger.info(
+                "Generation %d/%d complete: best_score=%.4f feasible=%s feasible_count=%d cache_hits=%d",
+                generation + 1,
+                self._generations,
+                generation_best.weighted_score,
+                generation_best.feasible,
+                sum(1 for item in evaluated if item.feasible),
+                sum(1 for item in evaluated if item.cache_hit),
+            )
             selected = select_next_population(evaluated, self._population_size)
             if generation + 1 < self._generations:
                 population = self._make_next_population(selected, self._population_size)
+                logger.info(
+                    "Generation %d/%d: produced next population with %d candidates",
+                    generation + 2,
+                    self._generations,
+                    len(population),
+                )
 
         rank_fronts(history)
         pareto = [item for item in history if item.rank == 0 and item.feasible]
@@ -115,6 +149,13 @@ class HeuristicSearchRunner:
             pareto = sorted(history, key=lambda item: item.weighted_score)[: max(1, self._population_size // 4)]
         best = min(pareto, key=lambda item: item.weighted_score)
         self._persist_final(history, pareto, best)
+        logger.info(
+            "Heuristic search finished: evaluations=%d pareto=%d best_score=%.4f feasible=%s",
+            len(history),
+            len(pareto),
+            best.weighted_score,
+            best.feasible,
+        )
         return SearchResult(history=history, pareto_frontier=pareto, best=best)
 
     def _evaluate_generation(
@@ -174,6 +215,17 @@ class HeuristicSearchRunner:
                 estimated_power_watts=repair.estimated_power_watts,
                 penalty=repair.penalty + 1_000_000.0,
             )
+        logger.info(
+            "Candidate gen=%03d idx=%03d prepared: template=%s ranks=%s racks=%d cost=%.2f power=%.2f feasible=%s",
+            generation,
+            index,
+            chromosome.template_name,
+            exported.rank_count if exported is not None else "n/a",
+            _active_rack_count(chromosome),
+            repair.estimated_cost,
+            repair.estimated_power_watts,
+            repair.feasible and exported is not None,
+        )
 
         cached = self._cached_evaluation(signature)
         if cached is not None:
@@ -193,6 +245,13 @@ class HeuristicSearchRunner:
             dump_json(candidate_dir / "score.json", copied.to_summary())
             if copied.feedback is not None:
                 dump_json(candidate_dir / "feedback.json", _feedback_to_dict(copied.feedback))
+            logger.info(
+                "Candidate gen=%03d idx=%03d cache hit: score=%.4f feasible=%s",
+                generation,
+                index,
+                copied.weighted_score,
+                copied.feasible,
+            )
             return copied
 
         if not repair.feasible or exported is None:
@@ -206,11 +265,24 @@ class HeuristicSearchRunner:
             )
             dump_json(candidate_dir / "score.json", evaluation.to_summary())
             self._store_cached_evaluation(signature, evaluation)
+            logger.info(
+                "Candidate gen=%03d idx=%03d skipped with penalty: score=%.4f reason=%s",
+                generation,
+                index,
+                evaluation.weighted_score,
+                _message_preview(evaluation.messages),
+            )
             return evaluation
 
         feedback: ParsedPipelineFeedback | None = None
         messages = list(repair.messages)
         feasible = True
+        logger.info(
+            "Candidate gen=%03d idx=%03d running mapper/simulator: topology=%s",
+            generation,
+            index,
+            candidate_dir / "hardware_topology.json",
+        )
         try:
             feedback = self._pipeline.run(
                 topology_path=candidate_dir / "hardware_topology.json",
@@ -241,6 +313,17 @@ class HeuristicSearchRunner:
         if feedback is not None:
             dump_json(candidate_dir / "feedback.json", _feedback_to_dict(feedback))
         self._store_cached_evaluation(signature, evaluation)
+        logger.info(
+            "Candidate gen=%03d idx=%03d done: score=%.4f feasible=%s makespan_us=%.3f max_link_util=%.3f queue_ns=%.3f remote_ns=%.3f",
+            generation,
+            index,
+            evaluation.weighted_score,
+            evaluation.feasible,
+            evaluation.objectives[0],
+            evaluation.objectives[3],
+            evaluation.objectives[4],
+            evaluation.objectives[5],
+        )
         return evaluation
 
     def _cached_evaluation(self, signature: str) -> CandidateEvaluation | None:
@@ -537,3 +620,16 @@ def _json_number(value: float) -> float | str:
     if math.isnan(value):
         return "nan"
     return value
+
+
+def _active_rack_count(chromosome: Chromosome) -> int:
+    return sum(1 for rack in chromosome.racks if rack.active or not rack.optional)
+
+
+def _message_preview(messages: list[str]) -> str:
+    if not messages:
+        return "none"
+    text = "; ".join(messages[:2])
+    if len(messages) > 2:
+        text += "; ..."
+    return text

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +12,9 @@ from codesign_optimizer.optimizer.feedback_parser import (
     parse_pipeline_outputs,
 )
 from codesign_optimizer.optimizer.search_space import EvaluationSettings
+
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineClient(Protocol):
@@ -65,4 +70,25 @@ class MapperSimulatorPipelineClient:
                 f"mapper/simulator pipeline failed with exit code {result.returncode}; "
                 f"see {out_dir / 'optimizer_pipeline_stderr.txt'}"
             )
-        return parse_pipeline_outputs(out_dir)
+        feedback = parse_pipeline_outputs(out_dir)
+        if self.evaluation.cleanup_wrapper_intermediate:
+            _cleanup_large_wrapper_outputs(out_dir)
+        return feedback
+
+
+def _cleanup_large_wrapper_outputs(out_dir: Path) -> None:
+    targets = [
+        out_dir / "intermediate",
+        out_dir / "workload",
+    ]
+    removed: list[str] = []
+    for target in targets:
+        if not target.exists():
+            continue
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        removed.append(str(target))
+    if removed:
+        logger.info("Cleaned large wrapper outputs: %s", ", ".join(removed))

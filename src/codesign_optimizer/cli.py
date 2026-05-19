@@ -178,27 +178,86 @@ def tgrl_optimizer(
     catalog: Path = typer.Option(..., exists=True, readable=True, help="Component catalog JSON/JSONC."),
     space: Path = typer.Option(..., exists=True, readable=True, help="TG-RL search-space JSON/JSONC."),
     workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
-    episodes: int = typer.Option(20, min=1, max=10000, help="Number of TG-RL episodes."),
+    episodes: int = typer.Option(20, min=1, max=10000, help="Number of TG-RL episodes; for mode=v2 --resume, this many additional PPO updates are run."),
     steps_per_episode: int = typer.Option(8, min=1, max=10000, help="Graph edit steps per episode."),
-    mode: str = typer.Option("v0", help="TG-RL mode: v0 uses heuristic prior only, v1 adds a learnable linear policy."),
+    mode: str = typer.Option("v0", help="TG-RL mode: v0 heuristic prior, v1 linear policy, v2 GNN-PPO."),
     concurrency: int = typer.Option(1, min=1, max=1024, help="Candidate graph edits evaluated concurrently per step."),
     temperature: float = typer.Option(1.0, min=0.000001, help="Softmax sampling temperature."),
     heuristic_weight: float = typer.Option(1.0, min=0.0, help="Weight of telemetry heuristic prior in policy logits."),
-    learning_rate: float = typer.Option(0.05, min=0.0, help="Linear policy learning rate for mode=v1."),
-    kl_weight: float = typer.Option(0.05, min=0.0, help="Prior KL-style pull for mode=v1 policy updates."),
+    learning_rate: float = typer.Option(0.05, min=0.0, help="Policy learning rate for mode=v1/v2."),
+    kl_weight: float = typer.Option(0.05, min=0.0, help="Prior KL-style pull for mode=v1/v2 policy updates."),
+    ppo_epochs: int = typer.Option(4, min=1, help="PPO epochs per update for mode=v2."),
+    minibatch_size: int = typer.Option(16, min=1, help="PPO minibatch size for mode=v2."),
+    gamma: float = typer.Option(0.95, min=0.0, max=1.0, help="Discount factor for mode=v2."),
+    gae_lambda: float = typer.Option(0.90, min=0.0, max=1.0, help="GAE lambda for mode=v2."),
+    clip_range: float = typer.Option(0.2, min=0.0, help="PPO clip range for mode=v2."),
+    value_coef: float = typer.Option(0.5, min=0.0, help="PPO value loss coefficient for mode=v2."),
+    entropy_coef: float = typer.Option(0.01, min=0.0, help="PPO entropy coefficient for mode=v2."),
+    device: str = typer.Option("auto", help="TG-RL v2 torch device: auto, cpu, mps, or cuda."),
+    resume: Path | None = typer.Option(None, exists=True, readable=True, help="TG-RL v2 checkpoint to resume."),
     greedy: bool = typer.Option(False, help="Choose top-probability actions instead of sampling."),
     out: Path = typer.Option(Path("artifacts/tgrl_run"), help="TG-RL output directory."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
 ) -> None:
     configure_logging(verbose=verbose)
-    if mode not in {"v0", "v1"}:
-        console.print("[red]--mode must be one of: v0, v1[/red]")
+    if mode not in {"v0", "v1", "v2"}:
+        console.print("[red]--mode must be one of: v0, v1, v2[/red]")
         raise typer.Exit(code=2)
 
     component_library = load_component_library(load_jsonc(catalog))
     search_space = SearchSpace.model_validate(load_jsonc(space))
     repo_root = search_space.evaluation.repo_root or _default_repo_root()
     pipeline = MapperSimulatorPipelineClient(repo_root=repo_root, evaluation=search_space.evaluation)
+    if mode == "v2":
+        try:
+            from codesign_optimizer.optimizer.tgrl_v2 import ensure_torch_available
+
+            ensure_torch_available()
+            from codesign_optimizer.optimizer.tgrl_v2.trainer import TGRLPPOConfig, TGRLPPOTrainer
+        except RuntimeError as exc:
+            console.print(str(exc), style="red", markup=False)
+            raise typer.Exit(code=2) from exc
+
+        runner_v2 = TGRLPPOTrainer(
+            component_library=component_library,
+            search_space=search_space,
+            pipeline_client=pipeline,
+            workload_path=workload,
+            out_dir=out,
+            updates=episodes,
+            rollout_steps=steps_per_episode,
+            env_count=concurrency,
+            config=TGRLPPOConfig(
+                ppo_epochs=ppo_epochs,
+                minibatch_size=minibatch_size,
+                gamma=gamma,
+                gae_lambda=gae_lambda,
+                clip_range=clip_range,
+                value_coef=value_coef,
+                entropy_coef=entropy_coef,
+                kl_weight=kl_weight,
+                learning_rate=max(learning_rate, 1e-12),
+                heuristic_weight=heuristic_weight,
+                temperature=temperature,
+                device=device,
+                resume=resume,
+            ),
+        )
+        result_v2 = runner_v2.run()
+        console.print(
+            "[green]TG-RL v2 search completed[/green]\n"
+            f"Updates: {episodes}\n"
+            f"Rollout steps: {steps_per_episode}\n"
+            f"Rollout envs: {concurrency}\n"
+            f"Evaluations: {len(result_v2.history)}\n"
+            f"Transitions: {len(result_v2.transitions)}\n"
+            f"Best score: {result_v2.best.weighted_score:.4f}\n"
+            f"Global best score: {runner_v2.global_best_score:.4f}\n"
+            f"Best feasible: {result_v2.best.feasible}\n"
+            f"Artifacts: {out}"
+        )
+        return
+
     runner = TGRLSearchRunner(
         component_library=component_library,
         search_space=search_space,

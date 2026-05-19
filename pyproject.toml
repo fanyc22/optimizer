@@ -22,6 +22,9 @@ dependencies = [
 dev = [
   "pytest>=8.2",
 ]
+rl = [
+  "torch>=2.3",
+]
 
 [project.scripts]
 codesign-opt = "codesign_optimizer.cli:app"

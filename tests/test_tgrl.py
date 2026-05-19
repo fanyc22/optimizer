@@ -1,7 +1,12 @@
 import threading
 import time
+import importlib.util
+import json
 from pathlib import Path
 
+from typer.testing import CliRunner
+
+from codesign_optimizer.cli import app
 from codesign_optimizer.models.hardware import ComponentLibrary
 from codesign_optimizer.optimizer.chromosome import chromosome_from_template
 from codesign_optimizer.optimizer.exporter import HardwareTopologyExporter
@@ -405,3 +410,36 @@ def test_tgrl_v0_and_v1_run_with_fake_pipeline(tmp_path: Path) -> None:
     assert result_v1.best.feasible
     assert result_v1.policy_state
     assert (tmp_path / "tgrl_v1" / "policy_state.json").exists()
+
+
+def test_tgrl_v2_reports_missing_torch(tmp_path: Path) -> None:
+    if importlib.util.find_spec("torch") is not None:
+        return
+    catalog = tmp_path / "catalog.json"
+    space = tmp_path / "space.json"
+    workload = tmp_path / "workload.json"
+    catalog.write_text(json.dumps(_library().model_dump(mode="json")), encoding="utf-8")
+    space.write_text(json.dumps(_space().model_dump(mode="json")), encoding="utf-8")
+    workload.write_text("{}", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "tgrl",
+            "--catalog",
+            str(catalog),
+            "--space",
+            str(space),
+            "--workload",
+            str(workload),
+            "--mode",
+            "v2",
+            "--episodes",
+            "1",
+            "--steps-per-episode",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "TG-RL v2 requires PyTorch" in result.output

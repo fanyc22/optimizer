@@ -167,6 +167,28 @@ trajectory rewards with a KL-style pull toward the heuristic prior. TG-RL writes
 `episode_*/step_*` artifacts plus `trajectory.jsonl`, `policy_state.json`,
 `tgrl_summary.json`, `best_proposal.json`, and `best_hardware_topology.json`.
 
+`--mode v2` enables the optional GNN-PPO trainer. Install the RL extra first:
+
+```bash
+pip install -e ".[dev,rl]"
+codesign-opt tgrl \
+  --catalog ./examples/component_catalog_tcro_latent_rack.json \
+  --space ./examples/search_space_tcro_latent_rack.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --episodes 4 \
+  --steps-per-episode 4 \
+  --mode v2 \
+  --concurrency 2 \
+  --ppo-epochs 2 \
+  --device auto \
+  --out ./artifacts/tgrl_v2_run
+```
+
+In v2, `episodes` are PPO updates, `steps-per-episode` is rollout length, and
+`concurrency` is the number of parallel rollout environments. The trainer writes
+`update_*/env_*/step_*` artifacts, `ppo_metrics.json`, and
+`checkpoints/policy_latest.pt`.
+
 ## Key Design Notes
 
 - The sample simulator files are **JSONC** (comments included), so parser supports inline `// ...` comments.
