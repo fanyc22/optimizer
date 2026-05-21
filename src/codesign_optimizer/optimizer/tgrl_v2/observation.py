@@ -19,7 +19,7 @@ from codesign_optimizer.optimizer.tgrl import (
 NODE_FEATURE_DIM = 23
 EDGE_FEATURE_DIM = 8
 GLOBAL_FEATURE_DIM = 10
-ACTION_FEATURE_DIM = 28
+ACTION_FEATURE_DIM = 30
 
 
 @dataclass
@@ -235,6 +235,8 @@ class GraphObservationBuilder:
             "change_inter_rack_mode",
             "activate_optional_rack",
             "deactivate_optional_rack",
+            "add_rack_from_template",
+            "remove_rack",
         ]
         resource_order = ["gpu", "cpu", "memory", "switch", "endpoint_link", "inter_rack_link", "none"]
         rack = _find_rack(item.chromosome, action.rack_id) if action.rack_id else None

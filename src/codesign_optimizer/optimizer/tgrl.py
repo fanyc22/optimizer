@@ -19,6 +19,7 @@ from codesign_optimizer.optimizer.chromosome import (
     RackGene,
     chromosome_from_template,
     infer_type_pools,
+    rack_gene_from_archetype,
 )
 from codesign_optimizer.optimizer.exporter import ExportedHardware, HardwareTopologyExporter
 from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback
@@ -40,6 +41,8 @@ ActionType = Literal[
     "change_inter_rack_mode",
     "activate_optional_rack",
     "deactivate_optional_rack",
+    "add_rack_from_template",
+    "remove_rack",
 ]
 
 
@@ -796,12 +799,16 @@ def enumerate_graph_edit_actions(
 ) -> list[GraphEditAction]:
     pools = infer_type_pools(search_space, component_library.node_types, component_library.link_types)
     actions: list[GraphEditAction] = []
+    for archetype in search_space.rack_archetypes:
+        actions.append(GraphEditAction("add_rack_from_template", target=archetype.name))
     for rack in chromosome.racks:
         if rack.optional and not rack.active:
             actions.append(GraphEditAction("activate_optional_rack", rack_id=rack.rack_id))
             continue
         if rack.optional and rack.active:
             actions.append(GraphEditAction("deactivate_optional_rack", rack_id=rack.rack_id))
+        if rack.dynamic or rack.optional:
+            actions.append(GraphEditAction("remove_rack", rack_id=rack.rack_id))
         for resource in ("gpu", "cpu", "memory"):
             if _resource_allowed(rack, resource):
                 actions.append(GraphEditAction("expand_rack_resource", rack_id=rack.rack_id, resource=resource, delta=1))
@@ -856,7 +863,7 @@ def build_masked_actions(
         component_library=component_library,
         search_space=search_space,
     ):
-        candidate = apply_graph_edit_action(chromosome, action)
+        candidate = apply_graph_edit_action(chromosome, action, search_space=search_space)
         repair = repairer.repair_and_validate(candidate)
         if not repair.feasible:
             continue
@@ -897,9 +904,26 @@ def build_masked_actions(
     return actions
 
 
-def apply_graph_edit_action(chromosome: Chromosome, action: GraphEditAction) -> Chromosome:
+def apply_graph_edit_action(
+    chromosome: Chromosome,
+    action: GraphEditAction,
+    *,
+    search_space: SearchSpace | None = None,
+) -> Chromosome:
     result = chromosome.model_copy(deep=True)
     rack = _find_rack(result, action.rack_id) if action.rack_id else None
+    if action.action_type == "add_rack_from_template" and search_space is not None:
+        archetype = _find_rack_archetype(search_space, action.target)
+        if archetype is None:
+            return result
+        result.racks.append(rack_gene_from_archetype(archetype, _next_dynamic_rack_id(result, archetype.name)))
+        if result.inter_rack == "none" and len([item for item in result.racks if item.active or not item.optional]) > 1:
+            result.inter_rack = "ring"
+        return result
+    if action.action_type == "remove_rack" and rack is not None:
+        if rack.dynamic or rack.optional:
+            result.racks = [item for item in result.racks if item.rack_id != rack.rack_id]
+        return result
     if action.action_type == "activate_optional_rack" and rack is not None:
         rack.active = True
         if rack.activation_alpha is not None:
@@ -988,6 +1012,18 @@ def heuristic_action_score(
         score += max(0.0, network_pressure) * 0.5
         score -= context.constraint_pressure * 1.5
     elif action.action_type == "deactivate_optional_rack":
+        score += context.constraint_pressure * 3.0
+        if context.compute_utilization < 0.25 and context.remote_memory_pressure <= 0:
+            score += 0.5
+    elif action.action_type == "add_rack_from_template":
+        lowered_target = action.target.lower()
+        if any(token in lowered_target for token in ["gpu", "cpu", "compute", "hybrid"]):
+            score += max(0.0, context.compute_utilization - 0.75) * 4.0
+        if any(token in lowered_target for token in ["mem", "memory", "pool", "hybrid"]):
+            score += context.remote_memory_pressure * 5.0
+        score += max(0.0, network_pressure) * 0.5
+        score -= context.constraint_pressure * 1.5
+    elif action.action_type == "remove_rack":
         score += context.constraint_pressure * 3.0
         if context.compute_utilization < 0.25 and context.remote_memory_pressure <= 0:
             score += 0.5
@@ -1153,6 +1189,32 @@ def _find_rack(chromosome: Chromosome, rack_id: str) -> RackGene | None:
         if rack.rack_id == rack_id:
             return rack
     return None
+
+
+def _find_rack_archetype(search_space: SearchSpace, name: str) -> Any | None:
+    for archetype in search_space.rack_archetypes:
+        if archetype.name == name:
+            return archetype
+    return None
+
+
+def _next_dynamic_rack_id(chromosome: Chromosome, archetype_name: str) -> str:
+    base = _safe_id(archetype_name)
+    existing = {rack.rack_id for rack in chromosome.racks}
+    index = 0
+    while True:
+        candidate = f"dyn-{base}-{index}"
+        if candidate not in existing:
+            return candidate
+        index += 1
+
+
+def _safe_id(text: str) -> str:
+    cleaned = []
+    for char in text.lower():
+        cleaned.append(char if char.isalnum() else "-")
+    result = "-".join(part for part in "".join(cleaned).split("-") if part)
+    return result or "rack"
 
 
 def _get_count(rack: RackGene, resource: str) -> int:

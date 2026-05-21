@@ -13,6 +13,11 @@ class SearchLimits(BaseModel):
     max_peak_power_watts: float = Field(default=1_000_000_000.0, ge=0)
     max_rack_power_watts: float = Field(default=100_000.0, ge=0)
     max_rack_units: float = Field(default=42.0, ge=0)
+    max_total_racks: int | None = Field(default=None, ge=1)
+    min_compute_racks: int = Field(default=1, ge=0)
+    max_compute_racks: int | None = Field(default=None, ge=0)
+    max_memory_racks: int | None = Field(default=None, ge=0)
+    max_hybrid_racks: int | None = Field(default=None, ge=0)
 
 
 class SearchObjectiveWeights(BaseModel):
@@ -129,6 +134,61 @@ class RackSpec(BaseModel):
         return self
 
 
+class RackArchetype(BaseModel):
+    name: str
+    rack_id_prefix: str | None = None
+    role: RackRole | None = None
+    gpu_count: int = Field(default=0, ge=0)
+    cpu_count: int = Field(default=0, ge=0)
+    memory_pool_count: int = Field(default=0, ge=0)
+    switch_count: int = Field(default=1, ge=0)
+    gpu_type: str | None = None
+    cpu_type: str | None = None
+    memory_pool_type: str | None = None
+    switch_type: str | None = None
+    endpoint_link_type: str
+    gpu_link_type: str | None = None
+    cpu_link_type: str | None = None
+    memory_link_type: str | None = None
+    endpoint_link_qty: int = Field(default=1, ge=1)
+    gpu_link_qty: int | None = Field(default=None, ge=1)
+    cpu_link_qty: int | None = Field(default=None, ge=1)
+    memory_link_qty: int = Field(default=1, ge=1)
+    fabric: Literal["switch", "ring"] = "switch"
+    limits: RackCapacityLimits = Field(default_factory=RackCapacityLimits)
+
+    @model_validator(mode="after")
+    def validate_archetype(self) -> "RackArchetype":
+        self.to_rack_spec(self.rack_id_prefix or self.name)
+        return self
+
+    def to_rack_spec(self, rack_id: str) -> RackSpec:
+        return RackSpec(
+            rack_id=rack_id,
+            role=self.role,
+            optional=False,
+            active=True,
+            gpu_count=self.gpu_count,
+            cpu_count=self.cpu_count,
+            memory_pool_count=self.memory_pool_count,
+            switch_count=self.switch_count,
+            gpu_type=self.gpu_type,
+            cpu_type=self.cpu_type,
+            memory_pool_type=self.memory_pool_type,
+            switch_type=self.switch_type,
+            endpoint_link_type=self.endpoint_link_type,
+            gpu_link_type=self.gpu_link_type,
+            cpu_link_type=self.cpu_link_type,
+            memory_link_type=self.memory_link_type,
+            endpoint_link_qty=self.endpoint_link_qty,
+            gpu_link_qty=self.gpu_link_qty,
+            cpu_link_qty=self.cpu_link_qty,
+            memory_link_qty=self.memory_link_qty,
+            fabric=self.fabric,
+            limits=self.limits,
+        )
+
+
 class RackTemplate(BaseModel):
     name: str
     racks: list[RackSpec] | None = None
@@ -186,6 +246,7 @@ class RackTemplate(BaseModel):
 class SearchSpace(BaseModel):
     seed: int = 1
     templates: list[RackTemplate]
+    rack_archetypes: list[RackArchetype] = Field(default_factory=list)
     mutation: MutationSettings = MutationSettings()
     limits: SearchLimits = SearchLimits()
     objective_weights: SearchObjectiveWeights = SearchObjectiveWeights()
@@ -195,6 +256,9 @@ class SearchSpace(BaseModel):
     def validate_templates(self) -> "SearchSpace":
         if not self.templates:
             raise ValueError("search space must contain at least one template")
+        names = [item.name for item in self.rack_archetypes]
+        if len(names) != len(set(names)):
+            raise ValueError("rack_archetypes must have unique names")
         return self
 
 

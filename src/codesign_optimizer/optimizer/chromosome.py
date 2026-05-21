@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from codesign_optimizer.optimizer.search_space import (
+    RackArchetype,
     RackCapacityLimits,
     RackSpec,
     RackTemplate,
@@ -20,6 +21,7 @@ class RackGene(BaseModel):
     role: str = "compute"
     optional: bool = False
     active: bool = True
+    dynamic: bool = False
     activation_alpha: float | None = Field(default=None, ge=0)
     gpu_count: int = Field(ge=0)
     cpu_count: int = Field(ge=0)
@@ -116,14 +118,15 @@ def infer_type_pools(space: SearchSpace, node_types: dict[str, Any], link_types:
             )
         ]
         for rack in rack_specs:
-            if rack.gpu_type and rack.gpu_type not in gpu:
-                gpu.append(rack.gpu_type)
-            if rack.cpu_type and rack.cpu_type not in cpu:
-                cpu.append(rack.cpu_type)
-            if rack.memory_pool_type and rack.memory_pool_type not in memory:
-                memory.append(rack.memory_pool_type)
-            if rack.switch_type and rack.switch_type not in switch:
-                switch.append(rack.switch_type)
+            _add_rack_types_to_pools(rack, gpu, cpu, memory, switch)
+    for archetype in space.rack_archetypes:
+        _add_rack_types_to_pools(
+            archetype.to_rack_spec(archetype.rack_id_prefix or archetype.name),
+            gpu,
+            cpu,
+            memory,
+            switch,
+        )
 
     return TypePools(
         gpu=sorted(set(gpu)),
@@ -183,6 +186,14 @@ def chromosome_from_template(template: RackTemplate) -> Chromosome:
         inter_rack_link_type=inter_rack_link_type,
         inter_rack_link_qty=template.inter_rack_link_qty,
     )
+
+
+def rack_gene_from_archetype(archetype: RackArchetype, rack_id: str) -> RackGene:
+    rack = _rack_gene_from_spec(archetype.to_rack_spec(rack_id))
+    rack.dynamic = True
+    rack.optional = False
+    rack.active = True
+    return rack
 
 
 def initial_population(space: SearchSpace, population_size: int, rng: random.Random) -> list[Chromosome]:
@@ -311,6 +322,7 @@ def _rack_gene_from_spec(rack: RackSpec) -> RackGene:
         role=rack.role or _infer_rack_role(rack.gpu_count, rack.cpu_count, rack.memory_pool_count),
         optional=rack.optional,
         active=rack.active,
+        dynamic=False,
         activation_alpha=rack.activation_alpha,
         gpu_count=rack.gpu_count,
         cpu_count=rack.cpu_count,
@@ -346,6 +358,23 @@ def _require_endpoint_link_type(template: RackTemplate) -> str:
     if template.endpoint_link_type is None:
         raise ValueError(f"template {template.name} must set endpoint_link_type")
     return template.endpoint_link_type
+
+
+def _add_rack_types_to_pools(
+    rack: RackSpec,
+    gpu: list[str],
+    cpu: list[str],
+    memory: list[str],
+    switch: list[str],
+) -> None:
+    if rack.gpu_type and rack.gpu_type not in gpu:
+        gpu.append(rack.gpu_type)
+    if rack.cpu_type and rack.cpu_type not in cpu:
+        cpu.append(rack.cpu_type)
+    if rack.memory_pool_type and rack.memory_pool_type not in memory:
+        memory.append(rack.memory_pool_type)
+    if rack.switch_type and rack.switch_type not in switch:
+        switch.append(rack.switch_type)
 
 
 def _mutation_ops_for_rack(rack: RackGene) -> list[str]:

@@ -26,6 +26,16 @@ class CandidateRepairer:
     def repair_and_validate(self, chromosome: Chromosome) -> RepairReport:
         repaired = chromosome.model_copy(deep=True)
         messages: list[str] = []
+        rack_ids = [rack.rack_id for rack in repaired.racks]
+        if len(set(rack_ids)) != len(rack_ids):
+            return RepairReport(
+                chromosome=repaired,
+                feasible=False,
+                messages=["candidate has duplicate rack ids"],
+                estimated_cost=0.0,
+                estimated_power_watts=0.0,
+                penalty=1_000_000.0,
+            )
         for rack in repaired.racks:
             self._repair_rack(rack, messages)
 
@@ -60,6 +70,13 @@ class CandidateRepairer:
             messages=messages,
         )
         feasible, penalty = self._check_racks(
+            repaired,
+            limits,
+            feasible=feasible,
+            penalty=penalty,
+            messages=messages,
+        )
+        feasible, penalty = self._check_rack_count_limits(
             repaired,
             limits,
             feasible=feasible,
@@ -265,6 +282,42 @@ class CandidateRepairer:
                 feasible = False
                 penalty += (value - maximum) * 1000.0
                 messages.append(f"{rack.rack_id} {label} exceeds limit: {value} > {maximum}")
+        return feasible, penalty
+
+    def _check_rack_count_limits(
+        self,
+        chromosome: Chromosome,
+        limits: SearchLimits,
+        *,
+        feasible: bool,
+        penalty: float,
+        messages: list[str],
+    ) -> tuple[bool, float]:
+        active_racks = [rack for rack in chromosome.racks if rack.active or not rack.optional]
+        compute_racks = [
+            rack
+            for rack in active_racks
+            if rack.role in {"compute", "hybrid"} and rack.gpu_count + rack.cpu_count > 0
+        ]
+        memory_racks = [rack for rack in active_racks if rack.role == "memory"]
+        hybrid_racks = [rack for rack in active_racks if rack.role == "hybrid"]
+        checks = [
+            ("total racks", len(active_racks), limits.max_total_racks),
+            ("compute racks", len(compute_racks), limits.max_compute_racks),
+            ("memory racks", len(memory_racks), limits.max_memory_racks),
+            ("hybrid racks", len(hybrid_racks), limits.max_hybrid_racks),
+        ]
+        if len(compute_racks) < limits.min_compute_racks:
+            feasible = False
+            penalty += (limits.min_compute_racks - len(compute_racks)) * 100_000.0
+            messages.append(
+                f"compute rack count below minimum: {len(compute_racks)} < {limits.min_compute_racks}"
+            )
+        for label, value, maximum in checks:
+            if maximum is not None and value > maximum:
+                feasible = False
+                penalty += (value - maximum) * 100_000.0
+                messages.append(f"{label} exceeds limit: {value} > {maximum}")
         return feasible, penalty
 
     def _check_switch_radix(

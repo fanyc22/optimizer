@@ -814,8 +814,24 @@ class TGRLPPOTrainer:
 
     def _load_checkpoint(self, path: Path) -> None:
         checkpoint = torch.load(path, map_location=self._device, weights_only=False)
-        self._model.load_state_dict(checkpoint["model_state"])
-        if "optimizer_state" in checkpoint:
+        model_state = checkpoint["model_state"]
+        current_state = self._model.state_dict()
+        compatible_state = {
+            key: value
+            for key, value in model_state.items()
+            if key in current_state and current_state[key].shape == value.shape
+        }
+        skipped = sorted(set(model_state) - set(compatible_state))
+        current_state.update(compatible_state)
+        self._model.load_state_dict(current_state)
+        if skipped:
+            logger.warning(
+                "Checkpoint %s has %d incompatible model tensors; skipped optimizer state. First skipped keys: %s",
+                path,
+                len(skipped),
+                ", ".join(skipped[:4]),
+            )
+        elif "optimizer_state" in checkpoint:
             self._optimizer.load_state_dict(checkpoint["optimizer_state"])
         self._best_score = float(checkpoint.get("best_score", float("inf")))
         self._start_update = int(checkpoint.get("update", -1)) + 1

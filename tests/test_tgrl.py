@@ -202,6 +202,45 @@ def _space() -> SearchSpace:
                     "inter_rack_link_type": "OPTICAL",
                 }
             ],
+            "rack_archetypes": [
+                {
+                    "name": "gpu_leaf",
+                    "role": "compute",
+                    "gpu_count": 1,
+                    "cpu_count": 0,
+                    "memory_pool_count": 0,
+                    "switch_count": 1,
+                    "gpu_type": "GPU_SMALL",
+                    "switch_type": "SW",
+                    "endpoint_link_type": "FAST",
+                    "fabric": "switch",
+                    "limits": {
+                        "max_gpu_count": 2,
+                        "max_cpu_count": 0,
+                        "max_memory_pool_count": 0,
+                        "max_switch_count": 1,
+                    },
+                },
+                {
+                    "name": "memory_leaf",
+                    "role": "memory",
+                    "gpu_count": 0,
+                    "cpu_count": 0,
+                    "memory_pool_count": 1,
+                    "switch_count": 1,
+                    "memory_pool_type": "MEM",
+                    "switch_type": "SW",
+                    "endpoint_link_type": "FAST",
+                    "memory_link_type": "CXL",
+                    "fabric": "switch",
+                    "limits": {
+                        "max_gpu_count": 0,
+                        "max_cpu_count": 0,
+                        "max_memory_pool_count": 2,
+                        "max_switch_count": 1,
+                    },
+                },
+            ],
             "mutation": {
                 "min_gpu_per_rack": 0,
                 "max_gpu_per_rack": 2,
@@ -217,6 +256,7 @@ def _space() -> SearchSpace:
                 "max_peak_power_watts": 20000,
                 "max_rack_power_watts": 10000,
                 "max_rack_units": 42,
+                "max_total_racks": 4,
             },
         }
     )
@@ -245,6 +285,7 @@ def test_action_enumerator_and_mask_include_valid_graph_edits() -> None:
     actions = enumerate_graph_edit_actions(chromosome, component_library=library, search_space=space)
 
     assert any(action.action_type == "activate_optional_rack" for action in actions)
+    assert any(action.action_type == "add_rack_from_template" and action.target == "gpu_leaf" for action in actions)
     assert any(action.action_type == "expand_rack_resource" and action.resource == "gpu" for action in actions)
     assert any(action.action_type == "upgrade_link_qty" for action in actions)
 
@@ -262,6 +303,36 @@ def test_action_enumerator_and_mask_include_valid_graph_edits() -> None:
 
     assert masked
     assert all(item.repair.feasible for item in masked)
+
+
+def test_dynamic_add_and_remove_rack_from_archetype() -> None:
+    library = _library()
+    space = _space()
+    chromosome = chromosome_from_template(space.templates[0])
+
+    added = apply_graph_edit_action(
+        chromosome,
+        GraphEditAction("add_rack_from_template", target="gpu_leaf"),
+        search_space=space,
+    )
+    dynamic_rack = next(rack for rack in added.racks if rack.dynamic)
+    assert dynamic_rack.rack_id.startswith("dyn-gpu-leaf-")
+    assert dynamic_rack.gpu_count == 1
+    assert added.inter_rack == "ring"
+
+    report = CandidateRepairer(library, space).repair_and_validate(added)
+    exported = HardwareTopologyExporter(library).export(report.chromosome)
+    assert report.feasible
+    assert any(group["id"] == dynamic_rack.rack_id for group in exported.hardware_topology["hierarchy"]["groups"])
+
+    actions = enumerate_graph_edit_actions(added, component_library=library, search_space=space)
+    assert any(action.action_type == "remove_rack" and action.rack_id == dynamic_rack.rack_id for action in actions)
+    removed = apply_graph_edit_action(
+        added,
+        GraphEditAction("remove_rack", rack_id=dynamic_rack.rack_id),
+        search_space=space,
+    )
+    assert all(not rack.dynamic for rack in removed.racks)
 
 
 def test_action_mask_blocks_capacity_exceeding_expansion() -> None:
