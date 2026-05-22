@@ -23,7 +23,7 @@ from codesign_optimizer.optimizer.tgrl_v2.observation import (
     GraphObservationBuilder,
 )
 from codesign_optimizer.optimizer.tgrl_v2.ppo import PPOConfig, PPOTransition, attach_gae, ppo_update
-from codesign_optimizer.optimizer.tgrl_v2.trainer import TGRLPPOConfig, TGRLPPOTrainer
+from codesign_optimizer.optimizer.tgrl_v2.trainer import TGRLPPOConfig, TGRLPPOTrainer, _write_svg_lines
 
 
 class FakePipeline:
@@ -73,8 +73,20 @@ def _library() -> ComponentLibrary:
                 "SW": {"role": "switch", "radix": 64, "tdp_watts": 180, "cost_unit": 8000},
             },
             "link_types": {
-                "FAST": {"bandwidth_gbps": 100, "latency_ns": 100, "protocol": "NVLink", "cost_unit": 1000},
-                "CXL": {"bandwidth_gbps": 64, "latency_ns": 250, "protocol": "CXL", "cost_unit": 300},
+                "FAST": {
+                    "bandwidth_gbps": 100,
+                    "latency_ns": 100,
+                    "protocol": "NVLink",
+                    "level": "L3",
+                    "cost_unit": 1000,
+                },
+                "CXL": {
+                    "bandwidth_gbps": 64,
+                    "latency_ns": 250,
+                    "protocol": "CXL",
+                    "level": "L3",
+                    "cost_unit": 300,
+                },
                 "OPTICAL": {"bandwidth_gbps": 400, "latency_ns": 800, "protocol": "Optical", "level": "L4", "cost_unit": 3000},
             },
         }
@@ -92,28 +104,35 @@ def _space() -> SearchSpace:
                         {
                             "rack_id": "rack0",
                             "role": "hybrid",
-                            "gpu_count": 1,
-                            "cpu_count": 1,
+                            "max_slots": 4,
+                            "slots": [
+                                {"slot_id": "slot0", "node_type": "GPU"},
+                                {"slot_id": "slot1", "node_type": "CPU"},
+                                {"slot_id": "slot2"},
+                                {"slot_id": "slot3"},
+                            ],
                             "memory_pool_count": 1,
                             "switch_count": 1,
-                            "gpu_type": "GPU",
-                            "cpu_type": "CPU",
                             "memory_pool_type": "MEM",
                             "switch_type": "SW",
-                            "endpoint_link_type": "FAST",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
                             "memory_link_type": "CXL",
-                            "limits": {"max_gpu_count": 2, "max_cpu_count": 2, "max_memory_pool_count": 2, "max_switch_count": 1},
+                            "limits": {"max_slots": 4, "max_memory_pool_count": 2, "max_switch_count": 1},
                         },
                         {
                             "rack_id": "latent-mem",
                             "role": "memory",
                             "optional": True,
                             "active": False,
+                            "max_slots": 0,
+                            "slots": [],
                             "memory_pool_type": "MEM",
                             "switch_type": "SW",
-                            "endpoint_link_type": "FAST",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
                             "memory_link_type": "CXL",
-                            "limits": {"max_gpu_count": 0, "max_cpu_count": 0, "max_memory_pool_count": 2, "max_switch_count": 1},
+                            "limits": {"max_slots": 0, "max_memory_pool_count": 2, "max_switch_count": 1},
                         },
                     ],
                     "inter_rack": "ring",
@@ -121,13 +140,7 @@ def _space() -> SearchSpace:
                 }
             ],
             "mutation": {
-                "min_gpu_per_rack": 0,
-                "max_gpu_per_rack": 2,
-                "min_cpu_per_rack": 0,
-                "max_cpu_per_rack": 2,
-                "min_memory_pools_per_rack": 0,
-                "max_memory_pools_per_rack": 2,
-                "max_endpoint_link_qty": 3,
+                "max_intra_rack_link_qty": 3,
                 "max_inter_rack_link_qty": 3,
             },
             "limits": {"max_total_cost": 300000, "max_peak_power_watts": 20000, "max_rack_power_watts": 10000, "max_rack_units": 42},
@@ -281,3 +294,42 @@ def test_tgrl_v2_trainer_smoke_and_checkpoint_resume(tmp_path: Path) -> None:
     assert [row["update"] for row in update_rows] == [0, 1]
     assert [row["update"] for row in metric_rows] == [0, 1]
     assert max(row["update"] for row in candidate_rows) == 1
+
+
+def test_svg_curve_uses_robust_y_axis_for_outliers(tmp_path: Path) -> None:
+    path = tmp_path / "curve.svg"
+
+    _write_svg_lines(
+        path,
+        title="Outlier Curve",
+        x_label="update",
+        y_label="score",
+        series=[
+            ("score", [(0.0, 100.0), (1.0, 110.0), (2.0, 120.0), (3.0, 1_000_000.0)]),
+            ("best", [(0.0, 95.0), (1.0, 96.0), (2.0, 97.0), (3.0, 98.0)]),
+        ],
+    )
+
+    svg = path.read_text(encoding="utf-8")
+
+    assert 'data-clipped-points="1"' in svg
+    assert 'data-y-max="1000000' not in svg
+    assert "clipPath" in svg
+    assert svg.count("<polyline ") == 2
+    assert "outlier point(s) clipped" in svg
+
+
+def test_svg_curve_breaks_line_when_x_resets(tmp_path: Path) -> None:
+    path = tmp_path / "curve.svg"
+
+    _write_svg_lines(
+        path,
+        title="Restarted Curve",
+        x_label="update",
+        y_label="score",
+        series=[("score", [(0.0, 100.0), (1.0, 110.0), (0.0, 105.0), (1.0, 115.0)])],
+    )
+
+    svg = path.read_text(encoding="utf-8")
+
+    assert svg.count("<polyline ") == 2

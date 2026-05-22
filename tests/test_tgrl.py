@@ -127,12 +127,14 @@ def _library() -> ComponentLibrary:
                     "bandwidth_gbps": 100,
                     "latency_ns": 100,
                     "protocol": "NVLink",
+                    "level": "L3",
                     "cost_unit": 1000,
                 },
                 "CXL": {
                     "bandwidth_gbps": 64,
                     "latency_ns": 250,
                     "protocol": "CXL",
+                    "level": "L3",
                     "cost_unit": 300,
                 },
                 "OPTICAL": {
@@ -158,20 +160,22 @@ def _space() -> SearchSpace:
                         {
                             "rack_id": "rack0",
                             "role": "hybrid",
-                            "gpu_count": 1,
-                            "cpu_count": 1,
+                            "max_slots": 4,
+                            "slots": [
+                                {"slot_id": "slot0", "node_type": "GPU_SMALL"},
+                                {"slot_id": "slot1", "node_type": "CPU"},
+                                {"slot_id": "slot2"},
+                                {"slot_id": "slot3"},
+                            ],
                             "memory_pool_count": 1,
                             "switch_count": 1,
-                            "gpu_type": "GPU_SMALL",
-                            "cpu_type": "CPU",
                             "memory_pool_type": "MEM",
                             "switch_type": "SW",
-                            "endpoint_link_type": "FAST",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
                             "memory_link_type": "CXL",
-                            "fabric": "switch",
                             "limits": {
-                                "max_gpu_count": 2,
-                                "max_cpu_count": 2,
+                                "max_slots": 4,
                                 "max_memory_pool_count": 2,
                                 "max_switch_count": 1,
                             },
@@ -181,18 +185,17 @@ def _space() -> SearchSpace:
                             "role": "memory",
                             "optional": True,
                             "active": False,
-                            "gpu_count": 0,
-                            "cpu_count": 0,
+                            "max_slots": 0,
+                            "slots": [],
                             "memory_pool_count": 0,
                             "switch_count": 0,
                             "memory_pool_type": "MEM",
                             "switch_type": "SW",
-                            "endpoint_link_type": "FAST",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
                             "memory_link_type": "CXL",
-                            "fabric": "switch",
                             "limits": {
-                                "max_gpu_count": 0,
-                                "max_cpu_count": 0,
+                                "max_slots": 0,
                                 "max_memory_pool_count": 2,
                                 "max_switch_count": 1,
                             },
@@ -206,17 +209,17 @@ def _space() -> SearchSpace:
                 {
                     "name": "gpu_leaf",
                     "role": "compute",
-                    "gpu_count": 1,
-                    "cpu_count": 0,
-                    "memory_pool_count": 0,
+                    "max_slots": 2,
+                    "slots": [
+                        {"slot_id": "slot0", "node_type": "GPU_SMALL"},
+                        {"slot_id": "slot1"},
+                    ],
                     "switch_count": 1,
-                    "gpu_type": "GPU_SMALL",
                     "switch_type": "SW",
-                    "endpoint_link_type": "FAST",
-                    "fabric": "switch",
+                    "intra_rack_topology": "switch",
+                    "intra_rack_link_type": "FAST",
                     "limits": {
-                        "max_gpu_count": 2,
-                        "max_cpu_count": 0,
+                        "max_slots": 2,
                         "max_memory_pool_count": 0,
                         "max_switch_count": 1,
                     },
@@ -224,31 +227,24 @@ def _space() -> SearchSpace:
                 {
                     "name": "memory_leaf",
                     "role": "memory",
-                    "gpu_count": 0,
-                    "cpu_count": 0,
+                    "max_slots": 0,
+                    "slots": [],
                     "memory_pool_count": 1,
                     "switch_count": 1,
                     "memory_pool_type": "MEM",
                     "switch_type": "SW",
-                    "endpoint_link_type": "FAST",
+                    "intra_rack_topology": "switch",
+                    "intra_rack_link_type": "FAST",
                     "memory_link_type": "CXL",
-                    "fabric": "switch",
                     "limits": {
-                        "max_gpu_count": 0,
-                        "max_cpu_count": 0,
+                        "max_slots": 0,
                         "max_memory_pool_count": 2,
                         "max_switch_count": 1,
                     },
                 },
             ],
             "mutation": {
-                "min_gpu_per_rack": 0,
-                "max_gpu_per_rack": 2,
-                "min_cpu_per_rack": 0,
-                "max_cpu_per_rack": 2,
-                "min_memory_pools_per_rack": 0,
-                "max_memory_pools_per_rack": 2,
-                "max_endpoint_link_qty": 3,
+                "max_intra_rack_link_qty": 3,
                 "max_inter_rack_link_qty": 3,
             },
             "limits": {
@@ -286,8 +282,8 @@ def test_action_enumerator_and_mask_include_valid_graph_edits() -> None:
 
     assert any(action.action_type == "activate_optional_rack" for action in actions)
     assert any(action.action_type == "add_rack_from_template" and action.target == "gpu_leaf" for action in actions)
-    assert any(action.action_type == "expand_rack_resource" and action.resource == "gpu" for action in actions)
-    assert any(action.action_type == "upgrade_link_qty" for action in actions)
+    assert any(action.action_type == "add_node_to_slot" and action.target == "GPU_FAST" for action in actions)
+    assert any(action.action_type == "upgrade_intra_rack_link" for action in actions)
 
     masked = build_masked_actions(
         chromosome,
@@ -303,6 +299,84 @@ def test_action_enumerator_and_mask_include_valid_graph_edits() -> None:
 
     assert masked
     assert all(item.repair.feasible for item in masked)
+
+
+def test_link_actions_respect_rack_hierarchy_scopes() -> None:
+    library = _library()
+    space = _space()
+    chromosome = chromosome_from_template(space.templates[0])
+    actions = enumerate_graph_edit_actions(chromosome, component_library=library, search_space=space)
+
+    intra_targets = {
+        action.target
+        for action in actions
+        if action.action_type in {"upgrade_intra_rack_link", "downgrade_intra_rack_link"}
+    }
+    inter_targets = {
+        action.target
+        for action in actions
+        if action.action_type in {"upgrade_inter_rack_link", "downgrade_inter_rack_link"}
+    }
+
+    assert "OPTICAL" not in intra_targets
+    assert "FAST" not in inter_targets
+    assert "CXL" not in inter_targets
+
+
+def test_slot_replace_and_upgrade_actions_apply_to_nodes() -> None:
+    library = _library()
+    space = _space()
+    chromosome = chromosome_from_template(space.templates[0])
+    actions = enumerate_graph_edit_actions(chromosome, component_library=library, search_space=space)
+
+    cpu_to_gpu = next(
+        action
+        for action in actions
+        if action.action_type == "replace_node_type"
+        and action.rack_id == "rack0"
+        and action.resource == "slot1"
+        and action.target == "GPU_FAST"
+    )
+    gpu_to_cpu = next(
+        action
+        for action in actions
+        if action.action_type == "replace_node_type"
+        and action.rack_id == "rack0"
+        and action.resource == "slot0"
+        and action.target == "CPU"
+    )
+    upgrade_gpu = next(
+        action
+        for action in actions
+        if action.action_type == "upgrade_node"
+        and action.rack_id == "rack0"
+        and action.resource == "slot0"
+        and action.target == "GPU_FAST"
+    )
+
+    replaced_cpu = apply_graph_edit_action(chromosome, cpu_to_gpu, search_space=space)
+    replaced_gpu = apply_graph_edit_action(chromosome, gpu_to_cpu, search_space=space)
+    upgraded = apply_graph_edit_action(chromosome, upgrade_gpu, search_space=space)
+
+    assert next(slot for slot in replaced_cpu.racks[0].slots if slot.slot_id == "slot1").node_type == "GPU_FAST"
+    assert next(slot for slot in replaced_gpu.racks[0].slots if slot.slot_id == "slot0").node_type == "CPU"
+    assert next(slot for slot in upgraded.racks[0].slots if slot.slot_id == "slot0").node_type == "GPU_FAST"
+
+
+def test_seed_rack_remove_action_respects_flag() -> None:
+    library = _library()
+    space = _space()
+    chromosome = chromosome_from_template(space.templates[0])
+
+    default_actions = enumerate_graph_edit_actions(chromosome, component_library=library, search_space=space)
+    assert not any(action.action_type == "remove_rack" and action.rack_id == "rack0" for action in default_actions)
+
+    payload = space.model_dump(mode="json")
+    payload["mutation"]["allow_remove_initial_racks"] = True
+    removable_space = SearchSpace.model_validate(payload)
+    removable_actions = enumerate_graph_edit_actions(chromosome, component_library=library, search_space=removable_space)
+
+    assert any(action.action_type == "remove_rack" and action.rack_id == "rack0" for action in removable_actions)
 
 
 def test_dynamic_add_and_remove_rack_from_archetype() -> None:
@@ -340,7 +414,8 @@ def test_action_mask_blocks_capacity_exceeding_expansion() -> None:
     space = _space()
     chromosome = chromosome_from_template(space.templates[0])
     rack0 = next(rack for rack in chromosome.racks if rack.rack_id == "rack0")
-    rack0.gpu_count = rack0.limits.max_gpu_count or 2
+    for slot in rack0.slots:
+        slot.node_type = slot.node_type or "GPU_SMALL"
 
     masked = build_masked_actions(
         chromosome,
@@ -355,9 +430,8 @@ def test_action_mask_blocks_capacity_exceeding_expansion() -> None:
     )
 
     assert not any(
-        item.action.action_type == "expand_rack_resource"
+        item.action.action_type == "add_node_to_slot"
         and item.action.rack_id == "rack0"
-        and item.action.resource == "gpu"
         for item in masked
     )
 
@@ -370,12 +444,12 @@ def test_heuristic_prior_prefers_bottleneck_relevant_actions() -> None:
     compute_context = telemetry_context(_feedback(compute=0.96, network=0.1), report, space)
     remote_context = telemetry_context(_feedback(compute=0.3, network=0.2, remote_queue=2_000_000), report, space)
 
-    expand_gpu = GraphEditAction("expand_rack_resource", rack_id="rack0", resource="gpu", delta=1)
-    contract_gpu = GraphEditAction("contract_rack_resource", rack_id="rack0", resource="gpu", delta=-1)
+    add_gpu = GraphEditAction("add_node_to_slot", rack_id="rack0", resource="slot2", target="GPU_SMALL")
+    remove_gpu = GraphEditAction("remove_node_from_slot", rack_id="rack0", resource="slot0")
     activate_mem = GraphEditAction("activate_optional_rack", rack_id="latent-mem")
 
-    assert heuristic_action_score(expand_gpu, chromosome, component_library=library, context=compute_context) > heuristic_action_score(
-        contract_gpu,
+    assert heuristic_action_score(add_gpu, chromosome, component_library=library, context=compute_context) > heuristic_action_score(
+        remove_gpu,
         chromosome,
         component_library=library,
         context=compute_context,
@@ -401,8 +475,8 @@ def test_action_apply_repair_and_export_activate_optional_rack() -> None:
 
 def test_linear_policy_update_increases_positive_reward_action_score() -> None:
     policy = LinearPolicy()
-    action = GraphEditAction("expand_rack_resource", rack_id="rack0", resource="gpu", delta=1)
-    features = {"bias": 1.0, "type:expand_rack_resource": 1.0}
+    action = GraphEditAction("add_node_to_slot", rack_id="rack0", resource="slot2", target="GPU_SMALL")
+    features = {"bias": 1.0, "type:add_node_to_slot": 1.0}
     before = policy.score(features)
     policy.update(
         [
@@ -422,8 +496,8 @@ def test_linear_policy_update_increases_positive_reward_action_score() -> None:
             TrajectoryItem(
                 episode=0,
                 step=0,
-                action=GraphEditAction("contract_rack_resource", rack_id="rack0", resource="gpu", delta=-1),
-                features={"bias": 1.0, "type:contract_rack_resource": 1.0},
+                action=GraphEditAction("remove_node_from_slot", rack_id="rack0", resource="slot0"),
+                features={"bias": 1.0, "type:remove_node_from_slot": 1.0},
                 reward=-1.0,
                 prior_prob=0.5,
                 policy_prob=0.5,

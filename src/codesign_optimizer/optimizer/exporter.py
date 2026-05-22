@@ -11,7 +11,13 @@ from codesign_optimizer.models.hardware import (
     LinkTypeSpec,
     NodeTypeSpec,
 )
-from codesign_optimizer.optimizer.chromosome import Chromosome, RackGene, role_of_type
+from codesign_optimizer.optimizer.chromosome import Chromosome, RackGene, SlotGene, role_of_type
+from codesign_optimizer.optimizer.link_scope import (
+    LinkScope,
+    default_level_for_scope,
+    link_type_allowed_for_scope,
+    scope_label,
+)
 
 
 @dataclass(frozen=True)
@@ -42,18 +48,16 @@ class HardwareTopologyExporter:
         rank_map: list[dict[str, Any]] = []
         rank = 0
         memory_provider: dict[str, str] | None = None
+        rack_gateways: list[str] = []
 
-        rack_switches: list[str] = []
         for rack in active_racks:
             rack_children: list[str] = []
             switch_ids = self._add_switches(rack, nodes, proposal_nodes, rack_children)
-            rack_switches.extend(switch_ids[:1])
 
-            gpu_ids: list[str] = []
-            cpu_ids: list[str] = []
-            for idx in range(rack.gpu_count):
-                node_id = f"{rack.rack_id}_gpu{idx}"
-                gpu_ids.append(node_id)
+            compute_ids: list[str] = []
+            for slot in rack.occupied_slots:
+                node_id = f"{rack.rack_id}_{slot.slot_id}"
+                compute_ids.append(node_id)
                 rank = self._add_compute_node(
                     nodes,
                     proposal_nodes,
@@ -61,23 +65,7 @@ class HardwareTopologyExporter:
                     rack_children,
                     node_id=node_id,
                     rack_id=rack.rack_id,
-                    type_name=self._require_type(rack.gpu_type, "gpu_type"),
-                    kind="gpu",
-                    rank=rank,
-                )
-
-            for idx in range(rack.cpu_count):
-                node_id = f"{rack.rack_id}_cpu{idx}"
-                cpu_ids.append(node_id)
-                rank = self._add_compute_node(
-                    nodes,
-                    proposal_nodes,
-                    rank_map,
-                    rack_children,
-                    node_id=node_id,
-                    rack_id=rack.rack_id,
-                    type_name=self._require_type(rack.cpu_type, "cpu_type"),
-                    kind="cpu",
+                    type_name=self._require_node_type(slot.node_type, "slot.node_type"),
                     rank=rank,
                 )
 
@@ -91,20 +79,22 @@ class HardwareTopologyExporter:
                     rack_children,
                     node_id=node_id,
                     rack_id=rack.rack_id,
-                    type_name=self._require_type(rack.memory_pool_type, "memory_pool_type"),
+                    type_name=self._require_node_type(rack.memory_pool_type, "memory_pool_type"),
                 )
                 if memory_provider is None:
                     memory_provider = {"node_id": node_id, "capability_id": "pool_mem"}
 
             self._connect_rack(
                 rack,
-                gpu_ids,
-                cpu_ids,
+                compute_ids,
                 memory_ids,
                 switch_ids,
                 links,
                 proposal_links,
             )
+            gateway = self._rack_gateway(switch_ids, compute_ids, memory_ids)
+            if gateway:
+                rack_gateways.append(gateway)
 
             groups.append(
                 {
@@ -115,6 +105,9 @@ class HardwareTopologyExporter:
                     "children": rack_children,
                     "attrs": {
                         "role": rack.role,
+                        "origin": rack.origin,
+                        "max_slots": rack.max_slots,
+                        "intra_rack_topology": rack.intra_rack_topology,
                         "capacity_limits": rack.limits.model_dump(exclude_none=True),
                         "estimated_power_watts": self._rack_power(rack),
                         "estimated_cost": self._rack_cost(rack),
@@ -123,7 +116,7 @@ class HardwareTopologyExporter:
                 }
             )
 
-        self._connect_racks(chromosome, rack_switches, links, proposal_links)
+        self._connect_racks(chromosome, rack_gateways, links, proposal_links)
 
         if memory_provider is None and rank_map:
             memory_provider = {"node_id": rank_map[0]["node_id"], "capability_id": "local_mem"}
@@ -141,7 +134,7 @@ class HardwareTopologyExporter:
             hardware["defaults"] = {"memory_provider": memory_provider}
 
         proposal = HardwareProposal(
-            optimizer_version="heuristic_nsga2_v1",
+            optimizer_version="slot_tgrl_v1",
             iteration=iteration,
             component_library=self._library,
             system_instantiation={
@@ -159,9 +152,9 @@ class HardwareTopologyExporter:
         rack_children: list[str],
     ) -> list[str]:
         switch_ids: list[str] = []
-        if rack.fabric != "switch":
+        if rack.intra_rack_topology != "switch" or rack.switch_count <= 0:
             return switch_ids
-        type_name = self._require_type(rack.switch_type, "switch_type")
+        type_name = self._require_node_type(rack.switch_type, "switch_type")
         spec = self._library.node_types[type_name]
         for idx in range(rack.switch_count):
             node_id = f"{rack.rack_id}_sw{idx}"
@@ -195,10 +188,12 @@ class HardwareTopologyExporter:
         node_id: str,
         rack_id: str,
         type_name: str,
-        kind: str,
         rank: int,
     ) -> int:
         spec = self._library.node_types[type_name]
+        kind = node_role(type_name, spec)
+        if kind not in {"gpu", "cpu"}:
+            raise ValueError(f"slot node type {type_name} must be gpu or cpu")
         peak = self._peak_tflops(spec)
         memory_bw = spec.memory_bw_gbps or 200.0
         slots = spec.slots or (4 if kind == "cpu" else 1)
@@ -213,6 +208,7 @@ class HardwareTopologyExporter:
                 "level": "L3",
                 "domain": f"rack:{rack_id}",
                 "role": "rank_compute",
+                "attrs": {"slot_id": node_id.rsplit("_", 1)[-1], "node_type": type_name},
                 "capabilities": {
                     "compute": [
                         {
@@ -293,44 +289,33 @@ class HardwareTopologyExporter:
     def _connect_rack(
         self,
         rack: RackGene,
-        gpu_ids: list[str],
-        cpu_ids: list[str],
+        compute_ids: list[str],
         memory_ids: list[str],
         switch_ids: list[str],
         links: list[dict[str, Any]],
         proposal_links: list[InstantiatedLink],
     ) -> None:
-        if rack.fabric == "switch" and switch_ids:
+        if rack.intra_rack_topology == "none":
+            return
+        if rack.intra_rack_topology == "switch":
+            if not switch_ids:
+                raise ValueError(f"rack {rack.rack_id} switch topology has no switch")
             switch_id = switch_ids[0]
-            gpu_link_type = rack.gpu_link_type or rack.endpoint_link_type
-            cpu_link_type = rack.cpu_link_type or rack.endpoint_link_type
-            gpu_link_qty = rack.gpu_link_qty or rack.endpoint_link_qty
-            cpu_link_qty = rack.cpu_link_qty or rack.endpoint_link_qty
-            for node_id in gpu_ids:
+            slots_by_node = {f"{rack.rack_id}_{slot.slot_id}": slot for slot in rack.occupied_slots}
+            for node_id in compute_ids:
+                slot = slots_by_node[node_id]
                 self._add_link(
                     links,
                     proposal_links,
                     link_id=f"{node_id}_to_{switch_id}",
                     src=node_id,
                     dst=switch_id,
-                    link_type=gpu_link_type,
-                    qty=gpu_link_qty,
+                    link_type=slot.link_type or rack.intra_rack_link_type,
+                    qty=slot.link_qty or rack.intra_rack_link_qty,
                     stats_domain=f"rack:{rack.rack_id}",
                     bidirectional=True,
+                    scope="intra",
                 )
-            for node_id in cpu_ids:
-                self._add_link(
-                    links,
-                    proposal_links,
-                    link_id=f"{node_id}_to_{switch_id}",
-                    src=node_id,
-                    dst=switch_id,
-                    link_type=cpu_link_type,
-                    qty=cpu_link_qty,
-                    stats_domain=f"rack:{rack.rack_id}",
-                    bidirectional=True,
-                )
-            memory_link_type = rack.memory_link_type or rack.endpoint_link_type
             for node_id in memory_ids:
                 self._add_link(
                     links,
@@ -338,66 +323,65 @@ class HardwareTopologyExporter:
                     link_id=f"{node_id}_to_{switch_id}",
                     src=node_id,
                     dst=switch_id,
-                    link_type=memory_link_type,
+                    link_type=rack.memory_link_type or rack.intra_rack_link_type,
                     qty=rack.memory_link_qty,
                     stats_domain=f"rack:{rack.rack_id}",
                     bidirectional=True,
+                    scope="intra",
                 )
             return
 
-        ring_nodes = gpu_ids + cpu_ids + memory_ids
-        if len(ring_nodes) == 1:
+        rack_nodes = compute_ids + memory_ids
+        if len(rack_nodes) <= 1:
             return
-        rack_pairs = (
-            [(ring_nodes[0], ring_nodes[1])]
-            if len(ring_nodes) == 2
-            else [
-                (src, ring_nodes[(idx + 1) % len(ring_nodes)])
-                for idx, src in enumerate(ring_nodes)
-            ]
-        )
-        for src, dst in rack_pairs:
+        if rack.intra_rack_topology == "fully_connected":
+            pairs = [(src, dst) for idx, src in enumerate(rack_nodes) for dst in rack_nodes[idx + 1 :]]
+        else:
+            pairs = (
+                [(rack_nodes[0], rack_nodes[1])]
+                if len(rack_nodes) == 2
+                else [(src, rack_nodes[(idx + 1) % len(rack_nodes)]) for idx, src in enumerate(rack_nodes)]
+            )
+        for src, dst in pairs:
             self._add_link(
                 links,
                 proposal_links,
                 link_id=f"{src}_to_{dst}",
                 src=src,
                 dst=dst,
-                link_type=rack.endpoint_link_type,
-                qty=rack.endpoint_link_qty,
+                link_type=rack.intra_rack_link_type,
+                qty=rack.intra_rack_link_qty,
                 stats_domain=f"rack:{rack.rack_id}",
                 bidirectional=True,
+                scope="intra",
             )
 
     def _connect_racks(
         self,
         chromosome: Chromosome,
-        rack_switches: list[str],
+        rack_gateways: list[str],
         links: list[dict[str, Any]],
         proposal_links: list[InstantiatedLink],
     ) -> None:
-        if chromosome.inter_rack == "none" or len(rack_switches) <= 1:
+        if chromosome.inter_rack == "none" or len(rack_gateways) <= 1:
             return
         link_type = chromosome.inter_rack_link_type
         if link_type is None:
             return
 
-        pairs: list[tuple[str, str]] = []
         if chromosome.inter_rack == "ring":
             pairs = (
-                [(rack_switches[0], rack_switches[1])]
-                if len(rack_switches) == 2
+                [(rack_gateways[0], rack_gateways[1])]
+                if len(rack_gateways) == 2
                 else [
-                    (rack_switches[idx], rack_switches[(idx + 1) % len(rack_switches)])
-                    for idx in range(len(rack_switches))
+                    (rack_gateways[idx], rack_gateways[(idx + 1) % len(rack_gateways)])
+                    for idx in range(len(rack_gateways))
                 ]
             )
         elif chromosome.inter_rack == "fully_connected":
-            pairs = [
-                (src, dst)
-                for idx, src in enumerate(rack_switches)
-                for dst in rack_switches[idx + 1 :]
-            ]
+            pairs = [(src, dst) for idx, src in enumerate(rack_gateways) for dst in rack_gateways[idx + 1 :]]
+        else:
+            pairs = []
         for src, dst in pairs:
             self._add_link(
                 links,
@@ -409,6 +393,7 @@ class HardwareTopologyExporter:
                 qty=chromosome.inter_rack_link_qty,
                 stats_domain="cluster:cluster0",
                 bidirectional=True,
+                scope="inter",
             )
 
     def _add_link(
@@ -419,11 +404,20 @@ class HardwareTopologyExporter:
         link_id: str,
         src: str,
         dst: str,
-        link_type: str,
+        link_type: str | None,
         qty: int,
         stats_domain: str,
         bidirectional: bool,
+        scope: LinkScope,
     ) -> None:
+        if link_type is None:
+            raise ValueError(f"link {link_id} has no link_type")
+        if not link_type_allowed_for_scope(self._library, link_type, scope):
+            spec = self._library.link_types.get(link_type)
+            level = spec.level if spec is not None else "unknown"
+            raise ValueError(
+                f"link {link_id} uses {link_type} ({level}) in {scope_label(scope)} scope"
+            )
         spec = self._library.link_types[link_type]
         proposal_links.append(InstantiatedLink(src=src, dst=dst, link_type=link_type, qty=qty))
         links.append(
@@ -434,12 +428,21 @@ class HardwareTopologyExporter:
                 "bandwidth_gbps": spec.bandwidth_gbps * qty,
                 "latency_ns": spec.latency_ns,
                 "bidirectional": bidirectional,
-                "level": spec.level or "L3",
+                "level": spec.level or default_level_for_scope(scope),
                 "domain": stats_domain,
                 "technology": spec.technology or spec.protocol,
                 "stats_domain": stats_domain,
             }
         )
+
+    def _rack_gateway(self, switch_ids: list[str], compute_ids: list[str], memory_ids: list[str]) -> str | None:
+        if switch_ids:
+            return switch_ids[0]
+        if compute_ids:
+            return compute_ids[0]
+        if memory_ids:
+            return memory_ids[0]
+        return None
 
     def _rack_power(self, rack: RackGene) -> float:
         return sum(
@@ -460,16 +463,15 @@ class HardwareTopologyExporter:
         )
 
     def _rack_type_counts(self, rack: RackGene) -> list[tuple[str, int]]:
-        items: list[tuple[str, int]] = []
-        if rack.gpu_type and rack.gpu_count:
-            items.append((rack.gpu_type, rack.gpu_count))
-        if rack.cpu_type and rack.cpu_count:
-            items.append((rack.cpu_type, rack.cpu_count))
+        counts: dict[str, int] = {}
+        for slot in rack.occupied_slots:
+            if slot.node_type:
+                counts[slot.node_type] = counts.get(slot.node_type, 0) + 1
         if rack.memory_pool_type and rack.memory_pool_count:
-            items.append((rack.memory_pool_type, rack.memory_pool_count))
+            counts[rack.memory_pool_type] = counts.get(rack.memory_pool_type, 0) + rack.memory_pool_count
         if rack.switch_type and rack.switch_count:
-            items.append((rack.switch_type, rack.switch_count))
-        return items
+            counts[rack.switch_type] = counts.get(rack.switch_type, 0) + rack.switch_count
+        return list(counts.items())
 
     def _peak_tflops(self, spec: NodeTypeSpec) -> float:
         return (
@@ -479,7 +481,7 @@ class HardwareTopologyExporter:
             or 1.0
         )
 
-    def _require_type(self, type_name: str | None, field_name: str) -> str:
+    def _require_node_type(self, type_name: str | None, field_name: str) -> str:
         if not type_name:
             raise ValueError(f"{field_name} must be set before export")
         if type_name not in self._library.node_types:

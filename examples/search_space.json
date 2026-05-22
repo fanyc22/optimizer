@@ -3,58 +3,139 @@
   "templates": [
     {
       "name": "small_switch_memory_pool",
-      "rack_count": 1,
-      "gpu_count": 2,
-      "cpu_count": 1,
-      "memory_pool_count": 1,
-      "switch_count": 1,
-      "gpu_type": "GPU_80TF",
-      "cpu_type": "CPU_6TF",
-      "memory_pool_type": "CXL_Memory_Pool",
-      "switch_type": "Rack_Switch_32",
-      "endpoint_link_type": "NVLINK_SWITCH",
-      "memory_link_type": "PCIe_CXL",
+      "racks": [
+        {
+          "rack_id": "small_switch_memory_pool_rack0",
+          "role": "hybrid",
+          "max_slots": 3,
+          "slots": [
+            {
+              "slot_id": "gpu0",
+              "node_type": "GPU_80TF",
+              "link_type": "NVLINK_SWITCH",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu1",
+              "node_type": "GPU_80TF",
+              "link_type": "NVLINK_SWITCH",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu0",
+              "node_type": "CPU_6TF",
+              "link_type": "NVLINK_SWITCH",
+              "link_qty": 1
+            }
+          ],
+          "memory_pool_count": 1,
+          "switch_count": 1,
+          "memory_pool_type": "CXL_Memory_Pool",
+          "switch_type": "Rack_Switch_32",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "NVLINK_SWITCH",
+          "intra_rack_link_qty": 1,
+          "memory_link_type": "PCIe_CXL",
+          "memory_link_qty": 1,
+          "limits": {
+            "max_slots": 3
+          }
+        }
+      ],
+      "inter_rack": "none",
       "inter_rack_link_type": "OPTICAL_400G",
-      "endpoint_link_qty": 1,
-      "memory_link_qty": 1,
-      "inter_rack_link_qty": 1,
-      "fabric": "switch",
-      "inter_rack": "none"
+      "inter_rack_link_qty": 1
     },
     {
       "name": "two_rack_gpu_memory",
-      "rack_count": 2,
-      "gpu_count": 2,
-      "cpu_count": 1,
-      "memory_pool_count": 1,
-      "switch_count": 1,
-      "gpu_type": "GPU_80TF",
-      "cpu_type": "CPU_6TF",
-      "memory_pool_type": "CXL_Memory_Pool",
-      "switch_type": "Rack_Switch_32",
-      "endpoint_link_type": "NVLINK_SWITCH",
-      "memory_link_type": "PCIe_CXL",
+      "racks": [
+        {
+          "rack_id": "two_rack_gpu_memory_rack0",
+          "role": "hybrid",
+          "max_slots": 3,
+          "slots": [
+            {
+              "slot_id": "gpu0",
+              "node_type": "GPU_80TF",
+              "link_type": "NVLINK_SWITCH",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu1",
+              "node_type": "GPU_80TF",
+              "link_type": "NVLINK_SWITCH",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu0",
+              "node_type": "CPU_6TF",
+              "link_type": "NVLINK_SWITCH",
+              "link_qty": 1
+            }
+          ],
+          "memory_pool_count": 1,
+          "switch_count": 1,
+          "memory_pool_type": "CXL_Memory_Pool",
+          "switch_type": "Rack_Switch_32",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "NVLINK_SWITCH",
+          "intra_rack_link_qty": 1,
+          "memory_link_type": "PCIe_CXL",
+          "memory_link_qty": 1,
+          "limits": {
+            "max_slots": 3
+          }
+        },
+        {
+          "rack_id": "two_rack_gpu_memory_rack1",
+          "role": "hybrid",
+          "max_slots": 3,
+          "slots": [
+            {
+              "slot_id": "gpu0",
+              "node_type": "GPU_80TF",
+              "link_type": "NVLINK_SWITCH",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu1",
+              "node_type": "GPU_80TF",
+              "link_type": "NVLINK_SWITCH",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu0",
+              "node_type": "CPU_6TF",
+              "link_type": "NVLINK_SWITCH",
+              "link_qty": 1
+            }
+          ],
+          "memory_pool_count": 1,
+          "switch_count": 1,
+          "memory_pool_type": "CXL_Memory_Pool",
+          "switch_type": "Rack_Switch_32",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "NVLINK_SWITCH",
+          "intra_rack_link_qty": 1,
+          "memory_link_type": "PCIe_CXL",
+          "memory_link_qty": 1,
+          "limits": {
+            "max_slots": 3
+          }
+        }
+      ],
+      "inter_rack": "ring",
       "inter_rack_link_type": "OPTICAL_400G",
-      "endpoint_link_qty": 1,
-      "memory_link_qty": 1,
-      "inter_rack_link_qty": 1,
-      "fabric": "switch",
-      "inter_rack": "ring"
+      "inter_rack_link_qty": 1
     }
   ],
   "mutation": {
-    "min_gpu_per_rack": 1,
-    "max_gpu_per_rack": 4,
-    "min_cpu_per_rack": 0,
-    "max_cpu_per_rack": 2,
-    "min_memory_pools_per_rack": 0,
-    "max_memory_pools_per_rack": 2,
-    "min_endpoint_link_qty": 1,
-    "max_endpoint_link_qty": 4,
+    "min_intra_rack_link_qty": 1,
+    "max_intra_rack_link_qty": 4,
     "min_inter_rack_link_qty": 1,
     "max_inter_rack_link_qty": 4,
     "mutation_rate": 0.45,
-    "bottleneck_mutation_rate": 0.40,
+    "bottleneck_mutation_rate": 0.4,
     "elite_fraction": 0.25
   },
   "limits": {
@@ -66,10 +147,10 @@
   "objective_weights": {
     "makespan": 1.0,
     "cost": 0.15,
-    "power": 0.10,
-    "max_link_utilization": 0.20,
-    "max_queue_delay": 0.20,
-    "remote_memory_contention": 0.10
+    "power": 0.1,
+    "max_link_utilization": 0.2,
+    "max_queue_delay": 0.2,
+    "remote_memory_contention": 0.1
   },
   "evaluation": {
     "mapper": "heft",

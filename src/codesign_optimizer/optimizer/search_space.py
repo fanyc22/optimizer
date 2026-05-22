@@ -3,12 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from codesign_optimizer.models.hardware import ComponentLibrary
 
 
 class SearchLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     max_total_cost: float = Field(default=1_000_000_000.0, ge=0)
     max_peak_power_watts: float = Field(default=1_000_000_000.0, ge=0)
     max_rack_power_watts: float = Field(default=100_000.0, ge=0)
@@ -21,6 +23,8 @@ class SearchLimits(BaseModel):
 
 
 class SearchObjectiveWeights(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     makespan: float = Field(default=1.0, ge=0)
     cost: float = Field(default=0.15, ge=0)
     power: float = Field(default=0.10, ge=0)
@@ -30,36 +34,61 @@ class SearchObjectiveWeights(BaseModel):
 
 
 class MutationSettings(BaseModel):
-    min_gpu_per_rack: int = Field(default=0, ge=0)
-    max_gpu_per_rack: int = Field(default=8, ge=0)
-    min_cpu_per_rack: int = Field(default=0, ge=0)
-    max_cpu_per_rack: int = Field(default=8, ge=0)
-    min_memory_pools_per_rack: int = Field(default=0, ge=0)
-    max_memory_pools_per_rack: int = Field(default=4, ge=0)
-    min_endpoint_link_qty: int = Field(default=1, ge=1)
-    max_endpoint_link_qty: int = Field(default=8, ge=1)
+    model_config = ConfigDict(extra="forbid")
+
+    min_intra_rack_link_qty: int = Field(default=1, ge=1)
+    max_intra_rack_link_qty: int = Field(default=8, ge=1)
     min_inter_rack_link_qty: int = Field(default=1, ge=1)
     max_inter_rack_link_qty: int = Field(default=8, ge=1)
     mutation_rate: float = Field(default=0.35, ge=0, le=1)
     bottleneck_mutation_rate: float = Field(default=0.35, ge=0, le=1)
     elite_fraction: float = Field(default=0.20, ge=0, le=1)
+    allow_remove_initial_racks: bool = False
+
+    @property
+    def min_gpu_per_rack(self) -> int:
+        return 0
+
+    @property
+    def max_gpu_per_rack(self) -> int:
+        return 1_000_000
+
+    @property
+    def min_cpu_per_rack(self) -> int:
+        return 0
+
+    @property
+    def max_cpu_per_rack(self) -> int:
+        return 1_000_000
+
+    @property
+    def min_memory_pools_per_rack(self) -> int:
+        return 0
+
+    @property
+    def max_memory_pools_per_rack(self) -> int:
+        return 1_000_000
+
+    @property
+    def min_endpoint_link_qty(self) -> int:
+        return self.min_intra_rack_link_qty
+
+    @property
+    def max_endpoint_link_qty(self) -> int:
+        return self.max_intra_rack_link_qty
 
     @model_validator(mode="after")
     def validate_bounds(self) -> "MutationSettings":
-        if self.min_gpu_per_rack > self.max_gpu_per_rack:
-            raise ValueError("min_gpu_per_rack must be <= max_gpu_per_rack")
-        if self.min_cpu_per_rack > self.max_cpu_per_rack:
-            raise ValueError("min_cpu_per_rack must be <= max_cpu_per_rack")
-        if self.min_memory_pools_per_rack > self.max_memory_pools_per_rack:
-            raise ValueError("min_memory_pools_per_rack must be <= max_memory_pools_per_rack")
-        if self.min_endpoint_link_qty > self.max_endpoint_link_qty:
-            raise ValueError("min_endpoint_link_qty must be <= max_endpoint_link_qty")
+        if self.min_intra_rack_link_qty > self.max_intra_rack_link_qty:
+            raise ValueError("min_intra_rack_link_qty must be <= max_intra_rack_link_qty")
         if self.min_inter_rack_link_qty > self.max_inter_rack_link_qty:
             raise ValueError("min_inter_rack_link_qty must be <= max_inter_rack_link_qty")
         return self
 
 
 class EvaluationSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     mapper: str = "heft"
     parallel: str = "auto"
     topology_format: str = "hardware"
@@ -72,185 +101,169 @@ class EvaluationSettings(BaseModel):
 
 
 RackRole = Literal["compute", "memory", "hybrid"]
+RackOrigin = Literal["seed", "dynamic"]
+FabricMode = Literal["none", "ring", "fully_connected", "switch"]
+InterRackMode = Literal["none", "ring", "fully_connected"]
+
+
+class SlotSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slot_id: str
+    node_type: str | None = None
+    link_type: str | None = None
+    link_qty: int | None = Field(default=None, ge=1)
 
 
 class RackCapacityLimits(BaseModel):
-    max_gpu_count: int | None = Field(default=None, ge=0)
-    max_cpu_count: int | None = Field(default=None, ge=0)
+    model_config = ConfigDict(extra="forbid")
+
+    max_slots: int | None = Field(default=None, ge=0)
     max_memory_pool_count: int | None = Field(default=None, ge=0)
     max_switch_count: int | None = Field(default=None, ge=0)
     max_rack_units: float | None = Field(default=None, ge=0)
     max_power_watts: float | None = Field(default=None, ge=0)
 
+    @property
+    def max_gpu_count(self) -> int | None:
+        return self.max_slots
+
+    @property
+    def max_cpu_count(self) -> int | None:
+        return self.max_slots
+
 
 class RackSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rack_id: str
-    role: RackRole | None = None
+    role: RackRole = "compute"
     optional: bool = False
     active: bool = True
     activation_alpha: float | None = Field(default=None, ge=0)
-    gpu_count: int = Field(default=0, ge=0)
-    cpu_count: int = Field(default=0, ge=0)
+    origin: RackOrigin = "seed"
+    max_slots: int = Field(ge=0)
+    slots: list[SlotSpec] = Field(default_factory=list)
     memory_pool_count: int = Field(default=0, ge=0)
     switch_count: int = Field(default=1, ge=0)
-    gpu_type: str | None = None
-    cpu_type: str | None = None
     memory_pool_type: str | None = None
     switch_type: str | None = None
-    endpoint_link_type: str
-    gpu_link_type: str | None = None
-    cpu_link_type: str | None = None
+    intra_rack_topology: FabricMode = "switch"
+    intra_rack_link_type: str | None = None
+    intra_rack_link_qty: int = Field(default=1, ge=1)
     memory_link_type: str | None = None
-    endpoint_link_qty: int = Field(default=1, ge=1)
-    gpu_link_qty: int | None = Field(default=None, ge=1)
-    cpu_link_qty: int | None = Field(default=None, ge=1)
     memory_link_qty: int = Field(default=1, ge=1)
-    fabric: Literal["switch", "ring"] = "switch"
     limits: RackCapacityLimits = Field(default_factory=RackCapacityLimits)
 
     @model_validator(mode="after")
     def validate_rack(self) -> "RackSpec":
-        compute_count = self.gpu_count + self.cpu_count
-        if compute_count + self.memory_pool_count <= 0:
-            if not self.optional:
-                raise ValueError(f"rack {self.rack_id} must contain compute or memory nodes")
-            if self.role is None:
-                raise ValueError(f"optional empty rack {self.rack_id} must set role")
-            if self.active:
-                raise ValueError(f"optional empty rack {self.rack_id} must set active=false")
-        if self.fabric == "switch" and self.switch_count <= 0 and self.active:
-            raise ValueError(f"rack {self.rack_id} uses switch fabric but switch_count is 0")
-        if self.role is None:
-            if compute_count > 0 and self.memory_pool_count > 0:
-                self.role = "hybrid"
-            elif self.memory_pool_count > 0:
-                self.role = "memory"
-            else:
-                self.role = "compute"
-        if self.role == "memory" and compute_count > 0:
-            raise ValueError(f"rack {self.rack_id} role=memory cannot contain GPU/CPU nodes")
-        if self.role == "compute" and self.memory_pool_count > 0:
-            raise ValueError(f"rack {self.rack_id} role=compute cannot contain memory pools")
+        slot_ids = [slot.slot_id for slot in self.slots]
+        if len(slot_ids) != len(set(slot_ids)):
+            raise ValueError(f"rack {self.rack_id} has duplicate slot_id")
+        if len(self.slots) > self.max_slots:
+            raise ValueError(f"rack {self.rack_id} has more slots than max_slots")
+        if self.limits.max_slots is None:
+            self.limits.max_slots = self.max_slots
+        if self.limits.max_slots is not None and self.max_slots > self.limits.max_slots:
+            raise ValueError(f"rack {self.rack_id} max_slots exceeds limits.max_slots")
+        if self.optional and not self.active:
+            return self
+        if self.intra_rack_topology == "switch" and self.switch_count <= 0:
+            raise ValueError(f"rack {self.rack_id} uses switch topology but switch_count is 0")
+        if self.memory_pool_count > 0 and self.memory_pool_type is None:
+            raise ValueError(f"rack {self.rack_id} has memory pools but memory_pool_type is not set")
+        occupied = [slot for slot in self.slots if slot.node_type]
+        if self.role in {"compute", "hybrid"} and not occupied:
+            raise ValueError(f"rack {self.rack_id} must contain at least one occupied compute slot")
+        if self.role == "memory" and self.memory_pool_count <= 0:
+            raise ValueError(f"rack {self.rack_id} role=memory must contain memory pools")
         return self
 
 
 class RackArchetype(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     rack_id_prefix: str | None = None
-    role: RackRole | None = None
-    gpu_count: int = Field(default=0, ge=0)
-    cpu_count: int = Field(default=0, ge=0)
+    role: RackRole = "compute"
+    max_slots: int = Field(ge=0)
+    slots: list[SlotSpec] = Field(default_factory=list)
     memory_pool_count: int = Field(default=0, ge=0)
     switch_count: int = Field(default=1, ge=0)
-    gpu_type: str | None = None
-    cpu_type: str | None = None
     memory_pool_type: str | None = None
     switch_type: str | None = None
-    endpoint_link_type: str
-    gpu_link_type: str | None = None
-    cpu_link_type: str | None = None
+    intra_rack_topology: FabricMode = "switch"
+    intra_rack_link_type: str | None = None
+    intra_rack_link_qty: int = Field(default=1, ge=1)
     memory_link_type: str | None = None
-    endpoint_link_qty: int = Field(default=1, ge=1)
-    gpu_link_qty: int | None = Field(default=None, ge=1)
-    cpu_link_qty: int | None = Field(default=None, ge=1)
     memory_link_qty: int = Field(default=1, ge=1)
-    fabric: Literal["switch", "ring"] = "switch"
     limits: RackCapacityLimits = Field(default_factory=RackCapacityLimits)
 
     @model_validator(mode="after")
     def validate_archetype(self) -> "RackArchetype":
-        self.to_rack_spec(self.rack_id_prefix or self.name)
+        self.to_rack_spec(self.rack_id_prefix or self.name, origin="dynamic")
         return self
 
-    def to_rack_spec(self, rack_id: str) -> RackSpec:
+    def to_rack_spec(self, rack_id: str, *, origin: RackOrigin = "dynamic") -> RackSpec:
         return RackSpec(
             rack_id=rack_id,
             role=self.role,
             optional=False,
             active=True,
-            gpu_count=self.gpu_count,
-            cpu_count=self.cpu_count,
+            origin=origin,
+            max_slots=self.max_slots,
+            slots=[slot.model_copy(deep=True) for slot in self.slots],
             memory_pool_count=self.memory_pool_count,
             switch_count=self.switch_count,
-            gpu_type=self.gpu_type,
-            cpu_type=self.cpu_type,
             memory_pool_type=self.memory_pool_type,
             switch_type=self.switch_type,
-            endpoint_link_type=self.endpoint_link_type,
-            gpu_link_type=self.gpu_link_type,
-            cpu_link_type=self.cpu_link_type,
+            intra_rack_topology=self.intra_rack_topology,
+            intra_rack_link_type=self.intra_rack_link_type,
+            intra_rack_link_qty=self.intra_rack_link_qty,
             memory_link_type=self.memory_link_type,
-            endpoint_link_qty=self.endpoint_link_qty,
-            gpu_link_qty=self.gpu_link_qty,
-            cpu_link_qty=self.cpu_link_qty,
             memory_link_qty=self.memory_link_qty,
-            fabric=self.fabric,
-            limits=self.limits,
+            limits=self.limits.model_copy(deep=True),
         )
 
 
 class RackTemplate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
-    racks: list[RackSpec] | None = None
-    rack_count: int = Field(default=1, ge=1)
-    gpu_count: int = Field(default=0, ge=0)
-    cpu_count: int = Field(default=0, ge=0)
-    memory_pool_count: int = Field(default=0, ge=0)
-    switch_count: int = Field(default=1, ge=0)
-    gpu_type: str | None = None
-    cpu_type: str | None = None
-    memory_pool_type: str | None = None
-    switch_type: str | None = None
-    endpoint_link_type: str | None = None
-    gpu_link_type: str | None = None
-    cpu_link_type: str | None = None
-    memory_link_type: str | None = None
+    racks: list[RackSpec]
+    inter_rack: InterRackMode = "ring"
     inter_rack_link_type: str | None = None
-    rack_limits: RackCapacityLimits | None = None
-    endpoint_link_qty: int = Field(default=1, ge=1)
-    gpu_link_qty: int | None = Field(default=None, ge=1)
-    cpu_link_qty: int | None = Field(default=None, ge=1)
-    memory_link_qty: int = Field(default=1, ge=1)
     inter_rack_link_qty: int = Field(default=1, ge=1)
-    fabric: Literal["switch", "ring"] = "switch"
-    inter_rack: Literal["none", "ring", "fully_connected"] = "ring"
 
     @model_validator(mode="after")
     def validate_template(self) -> "RackTemplate":
-        if self.racks:
-            rack_ids = [rack.rack_id for rack in self.racks]
-            if len(set(rack_ids)) != len(rack_ids):
-                raise ValueError(f"template {self.name} has duplicate rack_id")
-            active_compute_racks = [
-                rack
-                for rack in self.racks
-                if (rack.active or not rack.optional) and rack.gpu_count + rack.cpu_count > 0
-            ]
-            if not active_compute_racks:
-                raise ValueError(f"template {self.name} must contain at least one active compute rack")
-            if self.inter_rack != "none" and not (
-                self.inter_rack_link_type or self.endpoint_link_type or self.racks[0].endpoint_link_type
-            ):
-                raise ValueError(f"template {self.name} needs inter_rack_link_type for inter-rack fabric")
-            return self
-
-        if self.endpoint_link_type is None:
-            raise ValueError(f"template {self.name} must set endpoint_link_type")
-        if self.gpu_count + self.cpu_count <= 0:
-            raise ValueError(f"template {self.name} must contain at least one compute node")
-        if self.fabric == "switch" and self.switch_count <= 0:
-            raise ValueError(f"template {self.name} uses switch fabric but switch_count is 0")
+        rack_ids = [rack.rack_id for rack in self.racks]
+        if len(rack_ids) != len(set(rack_ids)):
+            raise ValueError(f"template {self.name} has duplicate rack_id")
+        active_compute_racks = [
+            rack
+            for rack in self.racks
+            if (rack.active or not rack.optional)
+            and rack.role in {"compute", "hybrid"}
+            and any(slot.node_type for slot in rack.slots)
+        ]
+        if not active_compute_racks:
+            raise ValueError(f"template {self.name} must contain at least one active compute rack")
+        if self.inter_rack != "none" and not self.inter_rack_link_type:
+            raise ValueError(f"template {self.name} needs inter_rack_link_type for inter-rack fabric")
         return self
 
 
 class SearchSpace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     seed: int = 1
     templates: list[RackTemplate]
     rack_archetypes: list[RackArchetype] = Field(default_factory=list)
-    mutation: MutationSettings = MutationSettings()
-    limits: SearchLimits = SearchLimits()
-    objective_weights: SearchObjectiveWeights = SearchObjectiveWeights()
-    evaluation: EvaluationSettings = EvaluationSettings()
+    mutation: MutationSettings = Field(default_factory=MutationSettings)
+    limits: SearchLimits = Field(default_factory=SearchLimits)
+    objective_weights: SearchObjectiveWeights = Field(default_factory=SearchObjectiveWeights)
+    evaluation: EvaluationSettings = Field(default_factory=EvaluationSettings)
 
     @model_validator(mode="after")
     def validate_templates(self) -> "SearchSpace":

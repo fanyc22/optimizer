@@ -443,7 +443,7 @@ class HeuristicSearchRunner:
                 if rack.memory_pool_count < self._space.mutation.max_memory_pools_per_rack:
                     rack.memory_pool_count += 1
                 rack.memory_link_qty = min(
-                    self._space.mutation.max_endpoint_link_qty,
+                    self._space.mutation.max_intra_rack_link_qty,
                     rack.memory_link_qty + 1,
                 )
                 return child
@@ -458,7 +458,7 @@ class HeuristicSearchRunner:
         for rack in child.racks:
             if rack.rack_id in top_domain:
                 rack.endpoint_link_qty = min(
-                    self._space.mutation.max_endpoint_link_qty,
+                    self._space.mutation.max_intra_rack_link_qty,
                     rack.endpoint_link_qty + 1,
                 )
                 return child

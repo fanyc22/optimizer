@@ -102,6 +102,7 @@ def _library() -> ComponentLibrary:
                     "bandwidth_gbps": 100,
                     "latency_ns": 100,
                     "protocol": "NVLink",
+                    "level": "L3",
                     "cost_unit": 1000,
                 },
                 "OPTICAL": {
@@ -127,20 +128,22 @@ def _space() -> SearchSpace:
                         {
                             "rack_id": "rack0",
                             "role": "hybrid",
-                            "gpu_count": 1,
-                            "cpu_count": 1,
+                            "max_slots": 4,
+                            "slots": [
+                                {"slot_id": "slot0", "node_type": "GPU_SMALL"},
+                                {"slot_id": "slot1", "node_type": "CPU"},
+                                {"slot_id": "slot2"},
+                                {"slot_id": "slot3"},
+                            ],
                             "memory_pool_count": 1,
                             "switch_count": 1,
-                            "gpu_type": "GPU_SMALL",
-                            "cpu_type": "CPU",
                             "memory_pool_type": "MEM",
                             "switch_type": "SW",
-                            "endpoint_link_type": "FAST",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
                             "memory_link_type": "FAST",
-                            "fabric": "switch",
                             "limits": {
-                                "max_gpu_count": 2,
-                                "max_cpu_count": 2,
+                                "max_slots": 4,
                                 "max_memory_pool_count": 3,
                                 "max_switch_count": 1,
                             },
@@ -148,17 +151,18 @@ def _space() -> SearchSpace:
                         {
                             "rack_id": "rack1",
                             "role": "compute",
-                            "gpu_count": 1,
-                            "cpu_count": 0,
+                            "max_slots": 2,
+                            "slots": [
+                                {"slot_id": "slot0", "node_type": "GPU_SMALL"},
+                                {"slot_id": "slot1"},
+                            ],
                             "memory_pool_count": 0,
                             "switch_count": 1,
-                            "gpu_type": "GPU_SMALL",
                             "switch_type": "SW",
-                            "endpoint_link_type": "FAST",
-                            "fabric": "switch",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
                             "limits": {
-                                "max_gpu_count": 2,
-                                "max_cpu_count": 0,
+                                "max_slots": 2,
                                 "max_memory_pool_count": 0,
                                 "max_switch_count": 1,
                             },
@@ -169,13 +173,9 @@ def _space() -> SearchSpace:
                 }
             ],
             "mutation": {
-                "min_gpu_per_rack": 0,
-                "max_gpu_per_rack": 2,
-                "min_cpu_per_rack": 0,
-                "max_cpu_per_rack": 2,
-                "min_memory_pools_per_rack": 0,
-                "max_memory_pools_per_rack": 3,
-                "max_endpoint_link_qty": 4,
+                "min_intra_rack_link_qty": 1,
+                "max_intra_rack_link_qty": 4,
+                "min_inter_rack_link_qty": 1,
                 "max_inter_rack_link_qty": 4,
             },
             "limits": {
@@ -221,6 +221,28 @@ def test_tcro_lowering_exports_valid_topology(tmp_path: Path) -> None:
     assert candidate.chromosome.inter_rack in {"ring", "fully_connected"}
 
 
+def test_tcro_link_logits_are_scoped_by_hierarchy(tmp_path: Path) -> None:
+    runner = TCROSearchRunner(
+        component_library=_library(),
+        search_space=_space(),
+        pipeline_client=TelemetryFakePipeline(),
+        workload_path=tmp_path / "workload.json",
+        out_dir=tmp_path / "tcro",
+        steps=1,
+        samples_per_step=1,
+        concurrency=1,
+        config=TCROConfig(initial_temperature=0.0),
+    )
+
+    state = runner._initial_state()
+    rack0 = state.rack_state("rack0")
+
+    assert rack0 is not None
+    assert set(state.inter_rack_link_type_logits) == {"OPTICAL"}
+    assert set(rack0.link_type_logits["endpoint"]) == {"FAST"}
+    assert set(rack0.link_type_logits["memory"]) == {"FAST"}
+
+
 def test_tcro_optional_rack_slot_is_lowered_only_after_activation(tmp_path: Path) -> None:
     space = SearchSpace.model_validate(
         {
@@ -232,17 +254,20 @@ def test_tcro_optional_rack_slot_is_lowered_only_after_activation(tmp_path: Path
                         {
                             "rack_id": "rack0",
                             "role": "hybrid",
-                            "gpu_count": 1,
-                            "cpu_count": 1,
+                            "max_slots": 4,
+                            "slots": [
+                                {"slot_id": "slot0", "node_type": "GPU_SMALL"},
+                                {"slot_id": "slot1", "node_type": "CPU"},
+                                {"slot_id": "slot2"},
+                                {"slot_id": "slot3"},
+                            ],
                             "memory_pool_count": 1,
                             "switch_count": 1,
-                            "gpu_type": "GPU_SMALL",
-                            "cpu_type": "CPU",
                             "memory_pool_type": "MEM",
                             "switch_type": "SW",
-                            "endpoint_link_type": "FAST",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
                             "memory_link_type": "FAST",
-                            "fabric": "switch",
                         },
                         {
                             "rack_id": "latent-mem",
@@ -250,16 +275,17 @@ def test_tcro_optional_rack_slot_is_lowered_only_after_activation(tmp_path: Path
                             "optional": True,
                             "active": False,
                             "activation_alpha": 0.1,
-                            "gpu_count": 0,
-                            "cpu_count": 0,
+                            "max_slots": 0,
+                            "slots": [],
                             "memory_pool_count": 0,
                             "switch_count": 0,
                             "memory_pool_type": "MEM",
                             "switch_type": "SW",
-                            "endpoint_link_type": "FAST",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
                             "memory_link_type": "FAST",
-                            "fabric": "switch",
                             "limits": {
+                                "max_slots": 0,
                                 "max_memory_pool_count": 2,
                                 "max_switch_count": 1,
                             },

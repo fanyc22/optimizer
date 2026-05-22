@@ -5,7 +5,7 @@ import random
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from codesign_optimizer.optimizer.search_space import (
     RackArchetype,
@@ -13,37 +13,206 @@ from codesign_optimizer.optimizer.search_space import (
     RackSpec,
     RackTemplate,
     SearchSpace,
+    SlotSpec,
 )
 
 
+class SlotGene(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slot_id: str
+    node_type: str | None = None
+    link_type: str | None = None
+    link_qty: int | None = Field(default=None, ge=1)
+
+    @classmethod
+    def from_spec(cls, slot: SlotSpec) -> "SlotGene":
+        return cls(
+            slot_id=slot.slot_id,
+            node_type=slot.node_type,
+            link_type=slot.link_type,
+            link_qty=slot.link_qty,
+        )
+
+
 class RackGene(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rack_id: str
     role: str = "compute"
     optional: bool = False
     active: bool = True
     dynamic: bool = False
+    origin: str = "seed"
     activation_alpha: float | None = Field(default=None, ge=0)
-    gpu_count: int = Field(ge=0)
-    cpu_count: int = Field(ge=0)
-    memory_pool_count: int = Field(ge=0)
-    switch_count: int = Field(ge=0)
-    gpu_type: str | None = None
-    cpu_type: str | None = None
+    max_slots: int = Field(ge=0)
+    slots: list[SlotGene] = Field(default_factory=list)
+    memory_pool_count: int = Field(default=0, ge=0)
+    switch_count: int = Field(default=1, ge=0)
     memory_pool_type: str | None = None
     switch_type: str | None = None
-    endpoint_link_type: str
-    gpu_link_type: str | None = None
-    cpu_link_type: str | None = None
+    intra_rack_topology: str = "switch"
+    intra_rack_link_type: str | None = None
+    intra_rack_link_qty: int = Field(default=1, ge=1)
     memory_link_type: str | None = None
-    endpoint_link_qty: int = Field(default=1, ge=1)
-    gpu_link_qty: int | None = Field(default=None, ge=1)
-    cpu_link_qty: int | None = Field(default=None, ge=1)
     memory_link_qty: int = Field(default=1, ge=1)
-    fabric: str = "switch"
     limits: RackCapacityLimits = Field(default_factory=RackCapacityLimits)
+
+    @property
+    def occupied_slots(self) -> list[SlotGene]:
+        return [slot for slot in self.slots if slot.node_type]
+
+    @property
+    def free_slots(self) -> list[SlotGene]:
+        return [slot for slot in self.slots if not slot.node_type]
+
+    @property
+    def gpu_count(self) -> int:
+        return sum(1 for slot in self.occupied_slots if role_of_type(slot.node_type or "", None) == "gpu")
+
+    @gpu_count.setter
+    def gpu_count(self, value: int) -> None:
+        self._set_role_count("gpu", value)
+
+    @property
+    def cpu_count(self) -> int:
+        return sum(1 for slot in self.occupied_slots if role_of_type(slot.node_type or "", None) == "cpu")
+
+    @cpu_count.setter
+    def cpu_count(self, value: int) -> None:
+        self._set_role_count("cpu", value)
+
+    @property
+    def gpu_type(self) -> str | None:
+        return self._first_role_type("gpu")
+
+    @gpu_type.setter
+    def gpu_type(self, value: str | None) -> None:
+        self._set_role_type("gpu", value)
+
+    @property
+    def cpu_type(self) -> str | None:
+        return self._first_role_type("cpu")
+
+    @cpu_type.setter
+    def cpu_type(self, value: str | None) -> None:
+        self._set_role_type("cpu", value)
+
+    @property
+    def endpoint_link_type(self) -> str | None:
+        return self.intra_rack_link_type
+
+    @endpoint_link_type.setter
+    def endpoint_link_type(self, value: str | None) -> None:
+        self.intra_rack_link_type = value
+
+    @property
+    def endpoint_link_qty(self) -> int:
+        return self.intra_rack_link_qty
+
+    @endpoint_link_qty.setter
+    def endpoint_link_qty(self, value: int) -> None:
+        self.intra_rack_link_qty = value
+
+    @property
+    def gpu_link_type(self) -> str | None:
+        return self._first_role_link_type("gpu")
+
+    @gpu_link_type.setter
+    def gpu_link_type(self, value: str | None) -> None:
+        self._set_role_link_type("gpu", value)
+
+    @property
+    def cpu_link_type(self) -> str | None:
+        return self._first_role_link_type("cpu")
+
+    @cpu_link_type.setter
+    def cpu_link_type(self, value: str | None) -> None:
+        self._set_role_link_type("cpu", value)
+
+    @property
+    def gpu_link_qty(self) -> int | None:
+        return self._first_role_link_qty("gpu")
+
+    @gpu_link_qty.setter
+    def gpu_link_qty(self, value: int | None) -> None:
+        if value is not None:
+            self._set_role_link_qty("gpu", value)
+
+    @property
+    def cpu_link_qty(self) -> int | None:
+        return self._first_role_link_qty("cpu")
+
+    @cpu_link_qty.setter
+    def cpu_link_qty(self, value: int | None) -> None:
+        if value is not None:
+            self._set_role_link_qty("cpu", value)
+
+    @property
+    def fabric(self) -> str:
+        return self.intra_rack_topology
+
+    @fabric.setter
+    def fabric(self, value: str) -> None:
+        self.intra_rack_topology = value
+
+    def _first_role_type(self, role: str) -> str | None:
+        for slot in self.occupied_slots:
+            if role_of_type(slot.node_type or "", None) == role:
+                return slot.node_type
+        return None
+
+    def _set_role_type(self, role: str, value: str | None) -> None:
+        for slot in self.occupied_slots:
+            if role_of_type(slot.node_type or "", None) == role:
+                slot.node_type = value
+
+    def _first_role_link_qty(self, role: str) -> int | None:
+        for slot in self.occupied_slots:
+            if role_of_type(slot.node_type or "", None) == role:
+                return slot.link_qty
+        return None
+
+    def _first_role_link_type(self, role: str) -> str | None:
+        for slot in self.occupied_slots:
+            if role_of_type(slot.node_type or "", None) == role:
+                return slot.link_type
+        return None
+
+    def _set_role_link_qty(self, role: str, value: int) -> None:
+        for slot in self.occupied_slots:
+            if role_of_type(slot.node_type or "", None) == role:
+                slot.link_qty = value
+
+    def _set_role_link_type(self, role: str, value: str | None) -> None:
+        for slot in self.occupied_slots:
+            if role_of_type(slot.node_type or "", None) == role:
+                slot.link_type = value
+
+    def _set_role_count(self, role: str, value: int) -> None:
+        value = max(0, value)
+        role_slots = [slot for slot in self.occupied_slots if role_of_type(slot.node_type or "", None) == role]
+        current = len(role_slots)
+        if value < current:
+            for slot in role_slots[value:]:
+                slot.node_type = None
+                slot.link_type = None
+                slot.link_qty = None
+            return
+        if value == current:
+            return
+        type_name = self._first_role_type(role)
+        if type_name is None:
+            return
+        for slot in self.free_slots[: value - current]:
+            slot.node_type = type_name
+            slot.link_type = slot.link_type or self.intra_rack_link_type
+            slot.link_qty = self.intra_rack_link_qty
 
 
 class Chromosome(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     template_name: str
     racks: list[RackGene]
     inter_rack: str = "ring"
@@ -94,30 +263,7 @@ def infer_type_pools(space: SearchSpace, node_types: dict[str, Any], link_types:
             gpu.append(name)
 
     for template in space.templates:
-        rack_specs = template.racks or [
-            RackSpec(
-                rack_id="rack0",
-                gpu_count=template.gpu_count,
-                cpu_count=template.cpu_count,
-                memory_pool_count=template.memory_pool_count,
-                switch_count=template.switch_count,
-                gpu_type=template.gpu_type,
-                cpu_type=template.cpu_type,
-                memory_pool_type=template.memory_pool_type,
-                switch_type=template.switch_type,
-                endpoint_link_type=_require_endpoint_link_type(template),
-                gpu_link_type=template.gpu_link_type,
-                cpu_link_type=template.cpu_link_type,
-                memory_link_type=template.memory_link_type,
-                endpoint_link_qty=template.endpoint_link_qty,
-                gpu_link_qty=template.gpu_link_qty,
-                cpu_link_qty=template.cpu_link_qty,
-                memory_link_qty=template.memory_link_qty,
-                fabric=template.fabric,
-                limits=template.rack_limits or RackCapacityLimits(),
-            )
-        ]
-        for rack in rack_specs:
+        for rack in template.racks:
             _add_rack_types_to_pools(rack, gpu, cpu, memory, switch)
     for archetype in space.rack_archetypes:
         _add_rack_types_to_pools(
@@ -138,61 +284,20 @@ def infer_type_pools(space: SearchSpace, node_types: dict[str, Any], link_types:
 
 
 def chromosome_from_template(template: RackTemplate) -> Chromosome:
-    if template.racks:
-        racks = [_rack_gene_from_spec(rack) for rack in template.racks]
-        inter_rack_link_type = (
-            template.inter_rack_link_type
-            or template.endpoint_link_type
-            or racks[0].endpoint_link_type
-        )
-    else:
-        endpoint_link_type = _require_endpoint_link_type(template)
-        racks = [
-            RackGene(
-                rack_id=f"rack{idx}",
-                role=_infer_rack_role(
-                    template.gpu_count,
-                    template.cpu_count,
-                    template.memory_pool_count,
-                ),
-                optional=False,
-                active=True,
-                gpu_count=template.gpu_count,
-                cpu_count=template.cpu_count,
-                memory_pool_count=template.memory_pool_count,
-                switch_count=template.switch_count,
-                gpu_type=template.gpu_type,
-                cpu_type=template.cpu_type,
-                memory_pool_type=template.memory_pool_type,
-                switch_type=template.switch_type,
-                endpoint_link_type=endpoint_link_type,
-                gpu_link_type=template.gpu_link_type or endpoint_link_type,
-                cpu_link_type=template.cpu_link_type or endpoint_link_type,
-                memory_link_type=template.memory_link_type or endpoint_link_type,
-                endpoint_link_qty=template.endpoint_link_qty,
-                gpu_link_qty=template.gpu_link_qty or template.endpoint_link_qty,
-                cpu_link_qty=template.cpu_link_qty or template.endpoint_link_qty,
-                memory_link_qty=template.memory_link_qty,
-                fabric=template.fabric,
-                limits=template.rack_limits or RackCapacityLimits(),
-            )
-            for idx in range(template.rack_count)
-        ]
-        inter_rack_link_type = template.inter_rack_link_type or endpoint_link_type
     return Chromosome(
         template_name=template.name,
-        racks=racks,
+        racks=[_rack_gene_from_spec(rack, dynamic=False) for rack in template.racks],
         inter_rack=template.inter_rack,
-        inter_rack_link_type=inter_rack_link_type,
+        inter_rack_link_type=template.inter_rack_link_type,
         inter_rack_link_qty=template.inter_rack_link_qty,
     )
 
 
 def rack_gene_from_archetype(archetype: RackArchetype, rack_id: str) -> RackGene:
-    rack = _rack_gene_from_spec(archetype.to_rack_spec(rack_id))
-    rack.dynamic = True
+    rack = _rack_gene_from_spec(archetype.to_rack_spec(rack_id, origin="dynamic"), dynamic=True)
     rack.optional = False
     rack.active = True
+    rack.origin = "dynamic"
     return rack
 
 
@@ -217,78 +322,55 @@ def mutate_random(
     intensity: int = 1,
 ) -> Chromosome:
     result = chromosome.model_copy(deep=True)
-    settings = space.mutation
+    pools = _type_pools_from_space(space)
     for _ in range(max(1, intensity)):
-        rack = rng.choice(result.racks)
-        op = rng.choice(_mutation_ops_for_rack(rack))
-        if op == "gpu_count":
-            rack.gpu_count = _mutate_int(
-                rack.gpu_count,
-                settings.min_gpu_per_rack,
-                _count_limit(rack, "max_gpu_count", settings.max_gpu_per_rack),
-                rng,
-            )
-        elif op == "cpu_count":
-            rack.cpu_count = _mutate_int(
-                rack.cpu_count,
-                settings.min_cpu_per_rack,
-                _count_limit(rack, "max_cpu_count", settings.max_cpu_per_rack),
-                rng,
-            )
-        elif op == "memory_count":
-            rack.memory_pool_count = _mutate_int(
-                rack.memory_pool_count,
-                settings.min_memory_pools_per_rack,
-                _count_limit(
-                    rack,
-                    "max_memory_pool_count",
-                    settings.max_memory_pools_per_rack,
-                ),
-                rng,
-            )
-        elif op == "endpoint_qty":
-            rack.endpoint_link_qty = _mutate_int(
-                rack.endpoint_link_qty,
-                settings.min_endpoint_link_qty,
-                settings.max_endpoint_link_qty,
-                rng,
-            )
-            if rack.gpu_link_qty is not None:
-                rack.gpu_link_qty = _mutate_int(
-                    rack.gpu_link_qty,
-                    settings.min_endpoint_link_qty,
-                    settings.max_endpoint_link_qty,
-                    rng,
-                )
-            if rack.cpu_link_qty is not None:
-                rack.cpu_link_qty = _mutate_int(
-                    rack.cpu_link_qty,
-                    settings.min_endpoint_link_qty,
-                    settings.max_endpoint_link_qty,
-                    rng,
-                )
-        elif op == "memory_qty":
-            rack.memory_link_qty = _mutate_int(
-                rack.memory_link_qty,
-                settings.min_endpoint_link_qty,
-                settings.max_endpoint_link_qty,
+        active_racks = [rack for rack in result.racks if rack.active or not rack.optional]
+        if not active_racks:
+            break
+        rack = rng.choice(active_racks)
+        ops = _mutation_ops_for_rack(rack, pools, space)
+        if not ops:
+            continue
+        op = rng.choice(ops)
+        if op == "add_node":
+            slot = rng.choice(rack.free_slots)
+            choices = pools.gpu + pools.cpu
+            if choices:
+                slot.node_type = rng.choice(choices)
+                slot.link_type = slot.link_type or rack.intra_rack_link_type
+                slot.link_qty = rack.intra_rack_link_qty
+        elif op == "remove_node":
+            slot = rng.choice(rack.occupied_slots)
+            slot.node_type = None
+            slot.link_type = None
+            slot.link_qty = None
+        elif op == "replace_node":
+            slot = rng.choice(rack.occupied_slots)
+            choices = [item for item in pools.gpu + pools.cpu if item != slot.node_type]
+            if choices:
+                slot.node_type = rng.choice(choices)
+        elif op == "intra_qty":
+            rack.intra_rack_link_qty = _mutate_int(
+                rack.intra_rack_link_qty,
+                space.mutation.min_intra_rack_link_qty,
+                space.mutation.max_intra_rack_link_qty,
                 rng,
             )
         elif op == "inter_qty":
             result.inter_rack_link_qty = _mutate_int(
                 result.inter_rack_link_qty,
-                settings.min_inter_rack_link_qty,
-                settings.max_inter_rack_link_qty,
+                space.mutation.min_inter_rack_link_qty,
+                space.mutation.max_inter_rack_link_qty,
                 rng,
             )
+        elif op == "intra_mode":
+            rack.intra_rack_topology = rng.choice(["none", "ring", "fully_connected", "switch"])
+            if rack.intra_rack_topology == "switch" and rack.switch_count <= 0:
+                rack.switch_count = 1
         elif op == "inter_mode":
             result.inter_rack = rng.choice(["none", "ring", "fully_connected"])
-        elif op == "active":
-            rack.active = not rack.active
-
-        _repair_role_minimums(rack, space)
-        if rack.active and rack.fabric == "switch" and rack.switch_count == 0:
-            rack.switch_count = 1
+        elif op == "remove_rack":
+            result.racks = [item for item in result.racks if item.rack_id != rack.rack_id]
     return result
 
 
@@ -307,57 +389,28 @@ def crossover(left: Chromosome, right: Chromosome, rng: random.Random) -> Chromo
     return child
 
 
-def _mutate_int(value: int, minimum: int, maximum: int, rng: random.Random) -> int:
-    if maximum < minimum:
-        return maximum
-    if minimum == maximum:
-        return minimum
-    step = rng.choice([-1, 1])
-    return max(minimum, min(maximum, value + step))
-
-
-def _rack_gene_from_spec(rack: RackSpec) -> RackGene:
+def _rack_gene_from_spec(rack: RackSpec, *, dynamic: bool) -> RackGene:
     return RackGene(
         rack_id=rack.rack_id,
-        role=rack.role or _infer_rack_role(rack.gpu_count, rack.cpu_count, rack.memory_pool_count),
+        role=rack.role,
         optional=rack.optional,
         active=rack.active,
-        dynamic=False,
+        dynamic=dynamic,
+        origin=rack.origin,
         activation_alpha=rack.activation_alpha,
-        gpu_count=rack.gpu_count,
-        cpu_count=rack.cpu_count,
+        max_slots=rack.max_slots,
+        slots=[SlotGene.from_spec(slot) for slot in rack.slots],
         memory_pool_count=rack.memory_pool_count,
         switch_count=rack.switch_count,
-        gpu_type=rack.gpu_type,
-        cpu_type=rack.cpu_type,
         memory_pool_type=rack.memory_pool_type,
         switch_type=rack.switch_type,
-        endpoint_link_type=rack.endpoint_link_type,
-        gpu_link_type=rack.gpu_link_type or rack.endpoint_link_type,
-        cpu_link_type=rack.cpu_link_type or rack.endpoint_link_type,
-        memory_link_type=rack.memory_link_type or rack.endpoint_link_type,
-        endpoint_link_qty=rack.endpoint_link_qty,
-        gpu_link_qty=rack.gpu_link_qty or rack.endpoint_link_qty,
-        cpu_link_qty=rack.cpu_link_qty or rack.endpoint_link_qty,
+        intra_rack_topology=rack.intra_rack_topology,
+        intra_rack_link_type=rack.intra_rack_link_type,
+        intra_rack_link_qty=rack.intra_rack_link_qty,
+        memory_link_type=rack.memory_link_type,
         memory_link_qty=rack.memory_link_qty,
-        fabric=rack.fabric,
-        limits=rack.limits,
+        limits=rack.limits.model_copy(deep=True),
     )
-
-
-def _infer_rack_role(gpu_count: int, cpu_count: int, memory_pool_count: int) -> str:
-    compute_count = gpu_count + cpu_count
-    if compute_count > 0 and memory_pool_count > 0:
-        return "hybrid"
-    if memory_pool_count > 0:
-        return "memory"
-    return "compute"
-
-
-def _require_endpoint_link_type(template: RackTemplate) -> str:
-    if template.endpoint_link_type is None:
-        raise ValueError(f"template {template.name} must set endpoint_link_type")
-    return template.endpoint_link_type
 
 
 def _add_rack_types_to_pools(
@@ -367,81 +420,53 @@ def _add_rack_types_to_pools(
     memory: list[str],
     switch: list[str],
 ) -> None:
-    if rack.gpu_type and rack.gpu_type not in gpu:
-        gpu.append(rack.gpu_type)
-    if rack.cpu_type and rack.cpu_type not in cpu:
-        cpu.append(rack.cpu_type)
+    for slot in rack.slots:
+        if not slot.node_type:
+            continue
+        role = role_of_type(slot.node_type, None)
+        if role == "cpu" and slot.node_type not in cpu:
+            cpu.append(slot.node_type)
+        elif role == "gpu" and slot.node_type not in gpu:
+            gpu.append(slot.node_type)
     if rack.memory_pool_type and rack.memory_pool_type not in memory:
         memory.append(rack.memory_pool_type)
     if rack.switch_type and rack.switch_type not in switch:
         switch.append(rack.switch_type)
 
 
-def _mutation_ops_for_rack(rack: RackGene) -> list[str]:
-    if rack.optional and not rack.active:
-        return ["active"]
-    ops = ["endpoint_qty", "inter_qty", "inter_mode"]
-    if rack.optional:
-        ops.append("active")
-    if rack.role in {"compute", "hybrid"}:
-        if rack.gpu_type:
-            ops.append("gpu_count")
-        if rack.cpu_type:
-            ops.append("cpu_count")
-    if rack.role in {"memory", "hybrid"} and rack.memory_pool_type:
-        ops.extend(["memory_count", "memory_qty"])
+def _type_pools_from_space(space: SearchSpace) -> TypePools:
+    gpu: list[str] = []
+    cpu: list[str] = []
+    memory: list[str] = []
+    switch: list[str] = []
+    for template in space.templates:
+        for rack in template.racks:
+            _add_rack_types_to_pools(rack, gpu, cpu, memory, switch)
+    for archetype in space.rack_archetypes:
+        _add_rack_types_to_pools(archetype.to_rack_spec(archetype.name), gpu, cpu, memory, switch)
+    return TypePools(sorted(set(gpu)), sorted(set(cpu)), sorted(set(memory)), sorted(set(switch)), [])
+
+
+def _mutation_ops_for_rack(rack: RackGene, pools: TypePools, space: SearchSpace) -> list[str]:
+    ops = ["inter_qty", "inter_mode", "intra_qty", "intra_mode"]
+    if rack.free_slots and (pools.gpu or pools.cpu):
+        ops.append("add_node")
+    if len(rack.occupied_slots) > 1:
+        ops.extend(["replace_node", "remove_node"])
+    elif rack.occupied_slots:
+        ops.append("replace_node")
+    if rack.dynamic or (rack.origin == "seed" and space.mutation.allow_remove_initial_racks):
+        ops.append("remove_rack")
     return ops
 
 
-def _repair_role_minimums(rack: RackGene, space: SearchSpace) -> None:
-    if rack.optional and not rack.active:
-        return
-    settings = space.mutation
-    if rack.role == "memory":
-        rack.gpu_count = 0
-        rack.cpu_count = 0
-        if rack.memory_pool_count == 0:
-            rack.memory_pool_count = _minimal_count(
-                settings.min_memory_pools_per_rack,
-                _count_limit(
-                    rack,
-                    "max_memory_pool_count",
-                    settings.max_memory_pools_per_rack,
-                ),
-            )
-        return
-
-    if rack.role == "compute":
-        rack.memory_pool_count = 0
-        _ensure_compute_node(rack, space)
-        return
-
-    _ensure_compute_node(rack, space)
-    if rack.memory_pool_count == 0:
-        rack.memory_pool_count = _minimal_count(
-            settings.min_memory_pools_per_rack,
-            _count_limit(
-                rack,
-                "max_memory_pool_count",
-                settings.max_memory_pools_per_rack,
-            ),
-        )
-
-
-def _ensure_compute_node(rack: RackGene, space: SearchSpace) -> None:
-    settings = space.mutation
-    if rack.gpu_count + rack.cpu_count > 0:
-        return
-    if rack.gpu_type:
-        rack.gpu_count = _minimal_count(
-            settings.min_gpu_per_rack,
-            _count_limit(rack, "max_gpu_count", settings.max_gpu_per_rack),
-        )
-    elif rack.cpu_type:
-        rack.cpu_count = _minimal_count(
-            settings.min_cpu_per_rack,
-            _count_limit(rack, "max_cpu_count", settings.max_cpu_per_rack),
-        )
+def _mutate_int(value: int, minimum: int, maximum: int, rng: random.Random) -> int:
+    if maximum < minimum:
+        return maximum
+    if minimum == maximum:
+        return minimum
+    step = rng.choice([-1, 1])
+    return max(minimum, min(maximum, value + step))
 
 
 def _matching_rack(target: RackGene, candidates: list[RackGene], index: int) -> RackGene | None:
@@ -454,16 +479,3 @@ def _matching_rack(target: RackGene, candidates: list[RackGene], index: int) -> 
     if index < len(candidates):
         return candidates[index]
     return None
-
-
-def _minimal_count(minimum: int, maximum: int) -> int:
-    if maximum <= 0:
-        return 0
-    return min(maximum, max(1, minimum))
-
-
-def _count_limit(rack: RackGene, field_name: str, global_maximum: int) -> int:
-    rack_limit = getattr(rack.limits, field_name)
-    if rack_limit is None:
-        return global_maximum
-    return min(global_maximum, rack_limit)

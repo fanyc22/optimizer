@@ -3,71 +3,650 @@
   "templates": [
     {
       "name": "tc_16gpu_16cpu_single_switch_baseline",
-      "rack_count": 1,
-      "gpu_count": 16,
-      "cpu_count": 16,
-      "memory_pool_count": 0,
-      "switch_count": 1,
-      "gpu_type": "GPU_80TF_1800GBS",
-      "cpu_type": "CPU_6TF_220GBS",
-      "switch_type": "Spine_Switch_32",
-      "endpoint_link_type": "GPU_SWITCH_200G",
-      "gpu_link_type": "GPU_SWITCH_200G",
-      "cpu_link_type": "CPU_SWITCH_50G",
-      "endpoint_link_qty": 1,
-      "gpu_link_qty": 1,
-      "cpu_link_qty": 1,
-      "fabric": "switch",
+      "racks": [
+        {
+          "rack_id": "tc_16gpu_16cpu_single_switch_baseline_rack0",
+          "role": "compute",
+          "max_slots": 32,
+          "slots": [
+            {
+              "slot_id": "gpu0",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu1",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu2",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu3",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu4",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu5",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu6",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu7",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu8",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu9",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu10",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu11",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu12",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu13",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu14",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu15",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu0",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu1",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu2",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu3",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu4",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu5",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu6",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu7",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu8",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu9",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu10",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu11",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu12",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu13",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu14",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu15",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            }
+          ],
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "switch_type": "Spine_Switch_32",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "GPU_SWITCH_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_slots": 32
+          }
+        }
+      ],
       "inter_rack": "none"
     },
     {
       "name": "tc_16gpu_16cpu_single_switch_gpu_upgrade",
-      "rack_count": 1,
-      "gpu_count": 16,
-      "cpu_count": 16,
-      "memory_pool_count": 0,
-      "switch_count": 1,
-      "gpu_type": "GPU_80TF_1800GBS",
-      "cpu_type": "CPU_6TF_220GBS",
-      "switch_type": "Spine_Switch_64",
-      "endpoint_link_type": "GPU_SWITCH_200G",
-      "gpu_link_type": "GPU_SWITCH_400G",
-      "cpu_link_type": "CPU_SWITCH_50G",
-      "endpoint_link_qty": 1,
-      "gpu_link_qty": 1,
-      "cpu_link_qty": 1,
-      "fabric": "switch",
+      "racks": [
+        {
+          "rack_id": "tc_16gpu_16cpu_single_switch_gpu_upgrade_rack0",
+          "role": "compute",
+          "max_slots": 32,
+          "slots": [
+            {
+              "slot_id": "gpu0",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu1",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu2",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu3",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu4",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu5",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu6",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu7",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu8",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu9",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu10",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu11",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu12",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu13",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu14",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu15",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_400G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu0",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu1",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu2",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu3",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu4",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu5",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu6",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu7",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu8",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu9",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu10",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu11",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu12",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu13",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu14",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu15",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_50G",
+              "link_qty": 1
+            }
+          ],
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "switch_type": "Spine_Switch_64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "GPU_SWITCH_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_slots": 32
+          }
+        }
+      ],
       "inter_rack": "none"
     },
     {
       "name": "tc_16gpu_16cpu_single_switch_cpu_upgrade",
-      "rack_count": 1,
-      "gpu_count": 16,
-      "cpu_count": 16,
-      "memory_pool_count": 0,
-      "switch_count": 1,
-      "gpu_type": "GPU_80TF_1800GBS",
-      "cpu_type": "CPU_6TF_220GBS",
-      "switch_type": "Spine_Switch_64",
-      "endpoint_link_type": "GPU_SWITCH_200G",
-      "gpu_link_type": "GPU_SWITCH_200G",
-      "cpu_link_type": "CPU_SWITCH_100G",
-      "endpoint_link_qty": 1,
-      "gpu_link_qty": 1,
-      "cpu_link_qty": 1,
-      "fabric": "switch",
+      "racks": [
+        {
+          "rack_id": "tc_16gpu_16cpu_single_switch_cpu_upgrade_rack0",
+          "role": "compute",
+          "max_slots": 32,
+          "slots": [
+            {
+              "slot_id": "gpu0",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu1",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu2",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu3",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu4",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu5",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu6",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu7",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu8",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu9",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu10",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu11",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu12",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu13",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu14",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "gpu15",
+              "node_type": "GPU_80TF_1800GBS",
+              "link_type": "GPU_SWITCH_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu0",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu1",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu2",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu3",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu4",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu5",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu6",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu7",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu8",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu9",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu10",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu11",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu12",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu13",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu14",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "cpu15",
+              "node_type": "CPU_6TF_220GBS",
+              "link_type": "CPU_SWITCH_100G",
+              "link_qty": 1
+            }
+          ],
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "switch_type": "Spine_Switch_64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "GPU_SWITCH_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_slots": 32
+          }
+        }
+      ],
       "inter_rack": "none"
     }
   ],
   "mutation": {
-    "min_gpu_per_rack": 12,
-    "max_gpu_per_rack": 20,
-    "min_cpu_per_rack": 8,
-    "max_cpu_per_rack": 20,
-    "min_memory_pools_per_rack": 0,
-    "max_memory_pools_per_rack": 0,
-    "min_endpoint_link_qty": 1,
-    "max_endpoint_link_qty": 1,
+    "min_intra_rack_link_qty": 1,
+    "max_intra_rack_link_qty": 1,
     "min_inter_rack_link_qty": 1,
     "max_inter_rack_link_qty": 1,
     "mutation_rate": 0.35,
@@ -82,8 +661,8 @@
   },
   "objective_weights": {
     "makespan": 1.0,
-    "cost": 0.10,
-    "power": 0.10,
+    "cost": 0.1,
+    "power": 0.1,
     "max_link_utilization": 0.25,
     "max_queue_delay": 0.25,
     "remote_memory_contention": 0.0

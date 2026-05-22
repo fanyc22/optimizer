@@ -21,6 +21,7 @@ from codesign_optimizer.optimizer.chromosome import (
 )
 from codesign_optimizer.optimizer.exporter import ExportedHardware, HardwareTopologyExporter
 from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback
+from codesign_optimizer.optimizer.link_scope import LinkScope, link_type_allowed_for_scope, link_types_for_scope
 from codesign_optimizer.optimizer.pipeline_client import PipelineClient
 from codesign_optimizer.optimizer.repair import CandidateRepairer, RepairReport
 from codesign_optimizer.optimizer.search_space import SearchObjectiveWeights, SearchSpace
@@ -252,6 +253,8 @@ class TCROSearchRunner:
             raise ValueError("search space must contain at least one template")
         base = chromosome_from_template(self._space.templates[0])
         pools = infer_type_pools(self._space, self._library.node_types, self._library.link_types)
+        intra_links = link_types_for_scope(self._library, "intra")
+        inter_links = link_types_for_scope(self._library, "inter")
         racks: list[RackSupernetState] = []
         for rack in base.racks:
             racks.append(
@@ -279,10 +282,34 @@ class TCROSearchRunner:
                         "switch": _initial_logits(pools.switch, rack.switch_type),
                     },
                     link_type_logits={
-                        "endpoint": _initial_logits(pools.link, rack.endpoint_link_type),
-                        "gpu": _initial_logits(pools.link, rack.gpu_link_type or rack.endpoint_link_type),
-                        "cpu": _initial_logits(pools.link, rack.cpu_link_type or rack.endpoint_link_type),
-                        "memory": _initial_logits(pools.link, rack.memory_link_type or rack.endpoint_link_type),
+                        "endpoint": _initial_logits(
+                            intra_links,
+                            _scoped_link_preferred(self._library, rack.endpoint_link_type, "intra"),
+                        ),
+                        "gpu": _initial_logits(
+                            intra_links,
+                            _scoped_link_preferred(
+                                self._library,
+                                rack.gpu_link_type or rack.endpoint_link_type,
+                                "intra",
+                            ),
+                        ),
+                        "cpu": _initial_logits(
+                            intra_links,
+                            _scoped_link_preferred(
+                                self._library,
+                                rack.cpu_link_type or rack.endpoint_link_type,
+                                "intra",
+                            ),
+                        ),
+                        "memory": _initial_logits(
+                            intra_links,
+                            _scoped_link_preferred(
+                                self._library,
+                                rack.memory_link_type or rack.endpoint_link_type,
+                                "intra",
+                            ),
+                        ),
                     },
                 )
             )
@@ -292,7 +319,10 @@ class TCROSearchRunner:
             racks=racks,
             inter_rack_alpha=float(base.inter_rack_link_qty),
             inter_rack_mode_logits=_initial_logits(["none", "ring", "fully_connected"], base.inter_rack),
-            inter_rack_link_type_logits=_initial_logits(pools.link, base.inter_rack_link_type),
+            inter_rack_link_type_logits=_initial_logits(
+                inter_links,
+                _scoped_link_preferred(self._library, base.inter_rack_link_type, "inter"),
+            ),
             temperature=self._config.initial_temperature,
             step=0,
             seed=self._space.seed,
@@ -902,6 +932,16 @@ def _initial_logits(options: list[str], preferred: str | None) -> dict[str, floa
     if preferred and preferred in logits:
         logits[preferred] = 1.0
     return logits
+
+
+def _scoped_link_preferred(
+    library: ComponentLibrary,
+    preferred: str | None,
+    scope: LinkScope,
+) -> str | None:
+    if preferred and link_type_allowed_for_scope(library, preferred, scope):
+        return preferred
+    return None
 
 
 def _select_from_logits(

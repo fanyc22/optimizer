@@ -868,7 +868,7 @@ def _select_device(name: str) -> torch.device:
 def _initial_action() -> Any:
     from codesign_optimizer.optimizer.tgrl import GraphEditAction
 
-    return GraphEditAction(action_type="change_inter_rack_mode", target="initial")
+    return GraphEditAction(action_type="change_inter_rack_topology", target="initial")
 
 
 def _candidate_score_rows(
@@ -1013,18 +1013,19 @@ def _write_svg_lines(
         return
     xs = [point[0] for point in all_points]
     ys = [point[1] for point in all_points]
+    axis_ys = [
+        value
+        for _name, points in clean_series
+        for value in _robust_axis_values([point[1] for point in points])
+    ]
+    if not axis_ys:
+        axis_ys = ys
     min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
+    min_y, max_y = _padded_bounds(min(axis_ys), max(axis_ys))
     if min_x == max_x:
         min_x -= 0.5
         max_x += 0.5
-    if min_y == max_y:
-        pad = max(1.0, abs(min_y) * 0.05)
-        min_y -= pad
-        max_y += pad
-    y_pad = (max_y - min_y) * 0.08
-    min_y -= y_pad
-    max_y += y_pad
+    clipped_points = sum(1 for y in ys if y < min_y or y > max_y)
 
     def sx(x: float) -> float:
         return margin_left + (x - min_x) / (max_x - min_x) * plot_width
@@ -1033,9 +1034,14 @@ def _write_svg_lines(
         return margin_top + (max_y - y) / (max_y - min_y) * plot_height
 
     colors = ["#2563eb", "#16a34a", "#dc2626", "#9333ea", "#ea580c", "#0891b2"]
+    clip_id = "plot-area"
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" data-y-min="{min_y:.12g}" data-y-max="{max_y:.12g}" '
+        f'data-clipped-points="{clipped_points}">',
         '<rect width="100%" height="100%" fill="#ffffff"/>',
+        f'<defs><clipPath id="{clip_id}"><rect x="{margin_left}" y="{margin_top}" '
+        f'width="{plot_width}" height="{plot_height}"/></clipPath></defs>',
         f'<text x="{margin_left}" y="28" font-family="sans-serif" font-size="18" font-weight="700">{html.escape(title)}</text>',
         f'<line x1="{margin_left}" y1="{margin_top + plot_height}" x2="{margin_left + plot_width}" y2="{margin_top + plot_height}" stroke="#111827" stroke-width="1"/>',
         f'<line x1="{margin_left}" y1="{margin_top}" x2="{margin_left}" y2="{margin_top + plot_height}" stroke="#111827" stroke-width="1"/>',
@@ -1054,14 +1060,25 @@ def _write_svg_lines(
         if not points:
             continue
         color = colors[idx % len(colors)]
-        path_data = " ".join(f"{sx(x):.2f},{sy(y):.2f}" for x, y in points)
-        parts.append(f'<polyline fill="none" stroke="{color}" stroke-width="2.2" points="{path_data}"/>')
+        for segment in _line_segments(points):
+            if len(segment) < 2:
+                continue
+            path_data = " ".join(f"{sx(x):.2f},{sy(y):.2f}" for x, y in segment)
+            parts.append(
+                f'<polyline fill="none" stroke="{color}" stroke-width="2.2" '
+                f'clip-path="url(#{clip_id})" points="{path_data}"/>'
+            )
         for x, y in points:
-            parts.append(f'<circle cx="{sx(x):.2f}" cy="{sy(y):.2f}" r="3" fill="{color}"/>')
+            parts.append(f'<circle cx="{sx(x):.2f}" cy="{sy(y):.2f}" r="3" fill="{color}" clip-path="url(#{clip_id})"/>')
         legend_x = margin_left + 12 + (idx % 3) * 220
         legend_y = height - 34 + (idx // 3) * 16
         parts.append(f'<rect x="{legend_x}" y="{legend_y - 10}" width="16" height="4" fill="{color}"/>')
         parts.append(f'<text x="{legend_x + 22}" y="{legend_y - 5}" font-family="sans-serif" font-size="12" fill="#111827">{html.escape(name)}</text>')
+    if clipped_points:
+        parts.append(
+            f'<text x="{margin_left}" y="44" font-family="sans-serif" font-size="11" fill="#6b7280">'
+            f'Y axis uses robust range; {clipped_points} outlier point(s) clipped.</text>'
+        )
     parts.append(f'<text x="{margin_left + plot_width / 2 - 28:.1f}" y="{height - 16}" font-family="sans-serif" font-size="12" fill="#111827">{html.escape(x_label)}</text>')
     parts.append(
         f'<text x="18" y="{margin_top + plot_height / 2:.1f}" transform="rotate(-90 18 {margin_top + plot_height / 2:.1f})" '
@@ -1069,6 +1086,69 @@ def _write_svg_lines(
     )
     parts.append("</svg>")
     path.write_text("\n".join(parts), encoding="utf-8")
+
+
+def _robust_axis_bounds(values: list[float]) -> tuple[float, float]:
+    visible = _robust_axis_values(values)
+    if not visible:
+        return 0.0, 1.0
+    return _padded_bounds(min(visible), max(visible))
+
+
+def _robust_axis_values(values: list[float]) -> list[float]:
+    finite = sorted(value for value in values if _is_finite(value))
+    if not finite:
+        return []
+
+    visible = finite
+    if len(finite) >= 3:
+        median = _percentile(finite, 0.50)
+        deviations = sorted(abs(value - median) for value in finite)
+        mad = _percentile(deviations, 0.50)
+        if mad > 1e-12:
+            scaled_mad = 1.4826 * mad
+            lower = median - 8.0 * scaled_mad
+            upper = median + 8.0 * scaled_mad
+            candidate = [value for value in finite if lower <= value <= upper]
+            if len(candidate) >= max(2, len(finite) // 3):
+                visible = candidate
+
+    return visible
+
+
+def _padded_bounds(min_value: float, max_value: float) -> tuple[float, float]:
+    if min_value == max_value:
+        pad = max(1.0, abs(min_value) * 0.05)
+    else:
+        pad = (max_value - min_value) * 0.08
+    return min_value - pad, max_value + pad
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    if not values:
+        return float("nan")
+    if len(values) == 1:
+        return values[0]
+    index = max(0.0, min(1.0, fraction)) * (len(values) - 1)
+    lower = int(index)
+    upper = min(len(values) - 1, lower + 1)
+    weight = index - lower
+    return values[lower] * (1.0 - weight) + values[upper] * weight
+
+
+def _line_segments(points: list[tuple[float, float]]) -> list[list[tuple[float, float]]]:
+    segments: list[list[tuple[float, float]]] = []
+    current: list[tuple[float, float]] = []
+    previous_x: float | None = None
+    for x, y in points:
+        if current and previous_x is not None and x < previous_x:
+            segments.append(current)
+            current = []
+        current.append((x, y))
+        previous_x = x
+    if current:
+        segments.append(current)
+    return segments
 
 
 def _mean(values: Any) -> float:

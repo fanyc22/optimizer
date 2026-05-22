@@ -135,7 +135,7 @@ hardware graphs; the continuous relaxation is optimizer-internal. TCRO v1
 initializes from the first template in the search space, so use a single
 starting template when running focused continuous relaxation experiments.
 
-TCRO search spaces may include latent rack slots by setting a rack to
+TCRO search spaces may include latent rack templates by setting a rack to
 `"optional": true`, `"active": false`, and a small `activation_alpha`. Inactive
 optional racks are kept in the continuous supernet but are omitted from exported
 `hardware_topology.v2` until their `active_alpha` crosses the activation
@@ -145,9 +145,9 @@ changing the mapper/simulator interface.
 ## TG-RL Masked Graph-Edit Search
 
 TG-RL keeps the candidate hardware discrete. Each step enumerates legal
-rack-level graph edits, masks out edits that fail existing repair/export
-constraints, scores the remaining edits with simulator telemetry priors, and
-evaluates one or more sampled candidates:
+slot/node, rack-topology, inter-rack, and rack add/remove graph edits, masks out
+edits that fail existing repair/export constraints, scores the remaining edits
+with simulator telemetry priors, and evaluates one or more sampled candidates:
 
 ```bash
 codesign-opt tgrl \
