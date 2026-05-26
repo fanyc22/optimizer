@@ -24,6 +24,7 @@ from codesign_optimizer.optimizer.tgrl_v2.observation import (
 )
 from codesign_optimizer.optimizer.tgrl_v2.ppo import PPOConfig, PPOTransition, attach_gae, ppo_update
 from codesign_optimizer.optimizer.tgrl_v2.trainer import TGRLPPOConfig, TGRLPPOTrainer, _write_svg_lines
+from codesign_optimizer.optimizer.workload_suite import WorkloadSuite
 
 
 class FakePipeline:
@@ -269,6 +270,15 @@ def test_tgrl_v2_trainer_smoke_and_checkpoint_resume(tmp_path: Path) -> None:
     assert (out_dir / "curves" / "ppo_loss_curve.svg").exists()
 
     resume = out_dir / "checkpoints" / "policy_latest.pt"
+    checkpoint_before_resume = torch.load(resume, map_location="cpu", weights_only=False)
+    update0_scores = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((out_dir / "update_000").glob("env_*/initial/score.json"))
+        + sorted((out_dir / "update_000").glob("env_*/step_*/score.json"))
+    ]
+    update0_best = min(update0_scores, key=lambda item: item["weighted_score"])
+    assert checkpoint_before_resume["rollout_seed_chromosome"] == update0_best["chromosome"]
+
     trainer_resume = TGRLPPOTrainer(
         component_library=_library(),
         search_space=_space(),
@@ -284,16 +294,90 @@ def test_tgrl_v2_trainer_smoke_and_checkpoint_resume(tmp_path: Path) -> None:
 
     assert resumed.best.feasible
     assert (out_dir / "update_001").exists()
+    update1_initial = json.loads(
+        (out_dir / "update_001" / "env_000" / "initial" / "score.json").read_text(encoding="utf-8")
+    )
+    assert update1_initial["chromosome"] == checkpoint_before_resume["rollout_seed_chromosome"]
     latest = torch.load(out_dir / "checkpoints" / "policy_latest.pt", map_location="cpu", weights_only=False)
     assert latest["update"] == 1
     assert "rng_state" in latest
     assert "seen_signatures" in latest
+    assert latest["rollout_seed_chromosome"] is not None
     update_rows = json.loads((out_dir / "curves" / "update_scores.json").read_text(encoding="utf-8"))["rows"]
     metric_rows = json.loads((out_dir / "curves" / "ppo_metrics.json").read_text(encoding="utf-8"))["rows"]
     candidate_rows = json.loads((out_dir / "curves" / "candidate_scores.json").read_text(encoding="utf-8"))["rows"]
     assert [row["update"] for row in update_rows] == [0, 1]
     assert [row["update"] for row in metric_rows] == [0, 1]
     assert max(row["update"] for row in candidate_rows) == 1
+
+
+def test_tgrl_v2_trainer_runs_workload_suite(tmp_path: Path) -> None:
+    workload_a = tmp_path / "a.json"
+    workload_b = tmp_path / "b.json"
+    workload_a.write_text("{}", encoding="utf-8")
+    workload_b.write_text("{}", encoding="utf-8")
+    suite = WorkloadSuite.model_validate(
+        {
+            "name": "mixed",
+            "workload_concurrency": 2,
+            "workloads": [
+                {"name": "a", "path": str(workload_a), "weight": 0.7},
+                {"name": "b", "path": str(workload_b), "weight": 0.3},
+            ],
+        }
+    )
+    out_dir = tmp_path / "suite_v2"
+    out_dir.mkdir()
+    (out_dir / "baseline_suite.json").write_text(
+        json.dumps({"suite_name": "mixed", "makespans_us": {"a": 1_000_000_000.0, "b": 1_000_000_000.0}}),
+        encoding="utf-8",
+    )
+    fake_pipeline = FakePipeline(remote_queue=1_000_000, delay_s=0.01)
+    trainer = TGRLPPOTrainer(
+        component_library=_library(),
+        search_space=_space(),
+        pipeline_client=fake_pipeline,
+        workload_path=None,
+        workload_suite=suite,
+        out_dir=out_dir,
+        updates=1,
+        rollout_steps=1,
+        env_count=1,
+        config=TGRLPPOConfig(ppo_epochs=1, minibatch_size=1, device="cpu"),
+    )
+
+    result = trainer.run()
+
+    assert result.best.feasible
+    assert fake_pipeline.calls >= 2
+    assert fake_pipeline.max_active >= 2
+    assert (out_dir / "baseline_suite.json").exists()
+    baseline = json.loads((out_dir / "baseline_suite.json").read_text(encoding="utf-8"))
+    assert baseline["makespans_us"]["a"] != 1_000_000_000.0
+    assert baseline["makespans_us"]["b"] != 1_000_000_000.0
+    assert any((out_dir / "update_000").glob("env_*/step_*/suite_feedback.json"))
+    summary = json.loads((out_dir / "tgrl_summary.json").read_text(encoding="utf-8"))
+    assert summary["workload_suite"]["name"] == "mixed"
+    assert {row["workload"] for row in summary["per_workload_single_task_scores"]} == {"a", "b"}
+    score_row = summary["per_workload_single_task_scores"][0]
+    expected_single_task_score = (
+        score_row["makespan_us"] / 10_000.0
+        + 0.15 * (score_row["estimated_cost"] / 1_000_000.0)
+        + 0.10 * (score_row["estimated_power_watts"] / 100_000.0)
+        + 0.20 * score_row["max_link_utilization"]
+        + 0.20 * (score_row["max_queue_delay_ns"] / 1_000_000.0)
+        + 0.10 * (score_row["remote_memory_contention_ns"] / 1_000_000.0)
+    )
+    assert pytest.approx(score_row["single_task_score"]) == expected_single_task_score
+    rows = json.loads((out_dir / "curves" / "candidate_scores.json").read_text(encoding="utf-8"))["rows"]
+    assert "geomean_speedup" in rows[0]
+    assert "min_speedup" in rows[0]
+    workload_rows = json.loads((out_dir / "curves" / "workload_scores.json").read_text(encoding="utf-8"))["rows"]
+    assert {row["workload"] for row in workload_rows} == {"a", "b"}
+    assert "normalized_score" in workload_rows[0]
+    assert "single_task_score" in workload_rows[0]
+    assert "weighted_log_score" in workload_rows[0]
+    assert (out_dir / "curves" / "workload_scores.csv").exists()
 
 
 def test_svg_curve_uses_robust_y_axis_for_outliers(tmp_path: Path) -> None:

@@ -1,0 +1,17 @@
+{
+  "name": "small_mixed_suite",
+  "metric": "makespan",
+  "workload_concurrency": 1,
+  "workloads": [
+    {
+      "name": "supernodal_latency",
+      "path": "mapper/examples/supernodal_workload.json",
+      "weight": 0.5
+    },
+    {
+      "name": "supernodal_throughput",
+      "path": "mapper/examples/supernodal_workload.json",
+      "weight": 0.5
+    }
+  ]
+}

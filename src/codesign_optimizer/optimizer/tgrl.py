@@ -29,6 +29,7 @@ from codesign_optimizer.optimizer.pipeline_client import PipelineClient
 from codesign_optimizer.optimizer.repair import CandidateRepairer, RepairReport
 from codesign_optimizer.optimizer.search_space import SearchObjectiveWeights, SearchSpace
 from codesign_optimizer.optimizer.tcro import softmax
+from codesign_optimizer.optimizer.workload_suite import MultiWorkloadFeedback
 
 
 logger = logging.getLogger(__name__)
@@ -137,6 +138,7 @@ class TGRLEvaluation:
     repair: RepairReport
     exported: ExportedHardware | None = None
     feedback: ParsedPipelineFeedback | None = None
+    suite_feedback: MultiWorkloadFeedback | None = None
     cache_hit: bool = False
 
     @property
@@ -169,6 +171,7 @@ class TGRLEvaluation:
             "policy_prob": self.masked_action.policy_prob,
             "logprob": self.masked_action.logprob,
             "chromosome": self.chromosome.to_dict(),
+            "suite": self.suite_feedback.to_dict() if self.suite_feedback is not None else None,
         }
 
 
@@ -888,7 +891,7 @@ def build_masked_actions(
     search_space: SearchSpace,
     repairer: CandidateRepairer,
     exporter: HardwareTopologyExporter,
-    feedback: ParsedPipelineFeedback | None,
+    feedback: ParsedPipelineFeedback | MultiWorkloadFeedback | None,
     current_repair: RepairReport,
     policy: LinearPolicy | None,
     config: TGRLConfig,
@@ -1134,10 +1137,12 @@ def action_features(
 
 
 def telemetry_context(
-    feedback: ParsedPipelineFeedback | None,
+    feedback: ParsedPipelineFeedback | MultiWorkloadFeedback | None,
     repair: RepairReport,
     space: SearchSpace,
 ) -> TelemetryContext:
+    if isinstance(feedback, MultiWorkloadFeedback):
+        feedback = feedback.aggregate_feedback
     compute_util = _average_compute_utilization(feedback)
     network_util = feedback.max_link_utilization if feedback is not None else 0.0
     queue_pressure = min(1.0, (feedback.max_queue_delay_ns / 1_000_000.0) if feedback else 0.0)

@@ -15,6 +15,7 @@ from codesign_optimizer.optimizer.pipeline_client import MapperSimulatorPipeline
 from codesign_optimizer.optimizer.search_space import SearchSpace, load_component_library
 from codesign_optimizer.optimizer.tcro import TCROConfig, TCROSearchRunner
 from codesign_optimizer.optimizer.tgrl import TGRLConfig, TGRLSearchRunner
+from codesign_optimizer.optimizer.workload_suite import load_workload_suite
 from codesign_optimizer.simulator.file_adapter import FileBackedSimulatorClient
 from codesign_optimizer.utils.logging import configure_logging
 
@@ -177,7 +178,8 @@ def tcro_optimizer(
 def tgrl_optimizer(
     catalog: Path = typer.Option(..., exists=True, readable=True, help="Component catalog JSON/JSONC."),
     space: Path = typer.Option(..., exists=True, readable=True, help="TG-RL search-space JSON/JSONC."),
-    workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
+    workload: Path | None = typer.Option(None, exists=True, readable=True, help="Mapper workload JSON."),
+    workload_suite: Path | None = typer.Option(None, exists=True, readable=True, help="Workload suite JSON for TG-RL v2 multi-workload optimization."),
     episodes: int = typer.Option(20, min=1, max=10000, help="Number of TG-RL episodes; for mode=v2 --resume, this many additional PPO updates are run."),
     steps_per_episode: int = typer.Option(8, min=1, max=10000, help="Graph edit steps per episode."),
     mode: str = typer.Option("v0", help="TG-RL mode: v0 heuristic prior, v1 linear policy, v2 GNN-PPO."),
@@ -203,6 +205,15 @@ def tgrl_optimizer(
     if mode not in {"v0", "v1", "v2"}:
         console.print("[red]--mode must be one of: v0, v1, v2[/red]")
         raise typer.Exit(code=2)
+    if workload is not None and workload_suite is not None:
+        console.print("[red]Use only one of --workload or --workload-suite.[/red]")
+        raise typer.Exit(code=2)
+    if workload is None and workload_suite is None:
+        console.print("[red]One of --workload or --workload-suite is required.[/red]")
+        raise typer.Exit(code=2)
+    if workload_suite is not None and mode != "v2":
+        console.print("[red]--workload-suite is currently supported only with --mode v2.[/red]")
+        raise typer.Exit(code=2)
 
     component_library = load_component_library(load_jsonc(catalog))
     search_space = SearchSpace.model_validate(load_jsonc(space))
@@ -218,11 +229,13 @@ def tgrl_optimizer(
             console.print(str(exc), style="red", markup=False)
             raise typer.Exit(code=2) from exc
 
+        suite_model = load_workload_suite(workload_suite, repo_root=repo_root) if workload_suite is not None else None
         runner_v2 = TGRLPPOTrainer(
             component_library=component_library,
             search_space=search_space,
             pipeline_client=pipeline,
             workload_path=workload,
+            workload_suite=suite_model,
             out_dir=out,
             updates=episodes,
             rollout_steps=steps_per_episode,
@@ -244,6 +257,22 @@ def tgrl_optimizer(
             ),
         )
         result_v2 = runner_v2.run()
+        per_workload = ""
+        if result_v2.best.suite_feedback is not None:
+            score_by_workload = {
+                item["workload"]: item
+                for item in runner_v2.per_workload_single_task_scores(result_v2.best)
+            }
+            lines = ["", "Per-workload metrics for aggregate best:"]
+            for run in result_v2.best.suite_feedback.runs:
+                score = score_by_workload.get(run.name, {})
+                lines.append(
+                    "  "
+                    f"{run.name}: single_task_score={float(score.get('single_task_score', float('nan'))):.4f}, "
+                    f"makespan_us={run.makespan_us:.0f}, "
+                    f"success={run.success}"
+                )
+            per_workload = "\n".join(lines) + "\n"
         console.print(
             "[green]TG-RL v2 search completed[/green]\n"
             f"Updates: {episodes}\n"
@@ -254,9 +283,14 @@ def tgrl_optimizer(
             f"Best score: {result_v2.best.weighted_score:.4f}\n"
             f"Global best score: {runner_v2.global_best_score:.4f}\n"
             f"Best feasible: {result_v2.best.feasible}\n"
+            f"{per_workload}"
             f"Artifacts: {out}"
         )
         return
+
+    if workload is None:
+        console.print("[red]--workload is required for TG-RL v0/v1.[/red]")
+        raise typer.Exit(code=2)
 
     runner = TGRLSearchRunner(
         component_library=component_library,

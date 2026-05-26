@@ -29,6 +29,9 @@ class MapperSimulatorPipelineClient:
     python: str = "python3"
 
     def run(self, *, topology_path: Path, workload_path: Path, out_dir: Path) -> ParsedPipelineFeedback:
+        topology_path = topology_path.resolve()
+        workload_path = workload_path.resolve()
+        out_dir = out_dir.resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
         cmd = [
             self.python,

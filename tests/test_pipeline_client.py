@@ -37,7 +37,7 @@ stdout.write_text("[x] [statistics] [info] sys[0], Wall time: 123\\n", encoding=
 summary = {
     "case_name": "fake",
     "success": True,
-    "inputs": {"workload": args.workload},
+    "inputs": {"workload": args.workload, "topology": args.topology, "out": args.out},
     "simulator": {
         "stdout": str(stdout),
         "finished_count": 1,
@@ -70,6 +70,10 @@ def test_pipeline_client_cleans_large_wrapper_outputs_by_default(tmp_path: Path)
     assert not (out_dir / "workload").exists()
     assert (out_dir / "outputs" / "run_summary.json").exists()
     assert (out_dir / "outputs" / "simulator_stdout.txt").exists()
+    summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
+    assert Path(summary["inputs"]["topology"]).is_absolute()
+    assert Path(summary["inputs"]["workload"]).is_absolute()
+    assert Path(summary["inputs"]["out"]).is_absolute()
 
 
 def test_pipeline_client_can_keep_wrapper_outputs(tmp_path: Path) -> None:

@@ -32,6 +32,13 @@ from codesign_optimizer.optimizer.tgrl import (
 from codesign_optimizer.optimizer.tgrl_v2.model import TGRLGNNPolicy, policy_distribution
 from codesign_optimizer.optimizer.tgrl_v2.observation import GraphObservationBuilder
 from codesign_optimizer.optimizer.tgrl_v2.ppo import PPOConfig, PPOTransition, attach_gae, ppo_update
+from codesign_optimizer.optimizer.workload_suite import (
+    MultiWorkloadFeedback,
+    MultiWorkloadPipelineRunner,
+    WorkloadRunFeedback,
+    WorkloadSuite,
+    WorkloadSuiteBaseline,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -77,6 +84,7 @@ class EnvState:
     chromosome: Chromosome
     previous_score: float
     last_feedback: ParsedPipelineFeedback | None
+    last_suite_feedback: MultiWorkloadFeedback | None
     trajectory: list[PPOTransition]
     initial_evaluation: TGRLEvaluation
 
@@ -95,17 +103,25 @@ class TGRLPPOTrainer:
         component_library: ComponentLibrary,
         search_space: SearchSpace,
         pipeline_client: PipelineClient,
-        workload_path: Path,
+        workload_path: Path | None,
         out_dir: Path,
         updates: int,
         rollout_steps: int,
         env_count: int,
+        workload_suite: WorkloadSuite | None = None,
         config: TGRLPPOConfig | None = None,
     ) -> None:
         self._library = component_library
         self._space = search_space
         self._pipeline = pipeline_client
         self._workload_path = workload_path
+        self._workload_suite = workload_suite
+        self._suite_runner = (
+            MultiWorkloadPipelineRunner(pipeline_client, workload_suite)
+            if workload_suite is not None
+            else None
+        )
+        self._suite_baseline: WorkloadSuiteBaseline | None = None
         self._out_dir = out_dir
         self._updates = updates
         self._rollout_steps = rollout_steps
@@ -123,6 +139,9 @@ class TGRLPPOTrainer:
         self._seen_signatures: set[str] = set()
         self._best_score = float("inf")
         self._start_update = 0
+        self._rollout_seed_chromosome: Chromosome | None = None
+        if self._workload_path is None and self._workload_suite is None:
+            raise ValueError("TGRLPPOTrainer requires either workload_path or workload_suite")
         if self._config.resume is not None:
             self._load_checkpoint(self._config.resume)
 
@@ -130,13 +149,18 @@ class TGRLPPOTrainer:
     def global_best_score(self) -> float:
         return self._best_score
 
+    def per_workload_single_task_scores(self, evaluation: TGRLEvaluation) -> list[dict[str, Any]]:
+        return per_workload_single_task_scores(evaluation, self._space.objective_weights)
+
     def run(self) -> TGRLPPOResult:
         self._out_dir.mkdir(parents=True, exist_ok=True)
         (self._out_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
+        self._ensure_suite_baseline()
         history: list[TGRLEvaluation] = []
         all_transitions: list[PPOTransition] = []
         previous_candidate_rows = _load_curve_rows(self._out_dir / "curves" / "candidate_scores.json")
         previous_update_rows = _load_curve_rows(self._out_dir / "curves" / "update_scores.json")
+        previous_workload_rows = _load_curve_rows(self._out_dir / "curves" / "workload_scores.json")
         metrics_history: list[dict[str, Any]] = _load_curve_rows(self._out_dir / "curves" / "ppo_metrics.json")
         curve_initial_best = _best_from_existing_rows(
             previous_candidate_rows,
@@ -163,11 +187,12 @@ class TGRLPPOTrainer:
 
         for local_update, update in enumerate(range(self._start_update, self._start_update + self._updates)):
             logger.info(
-                "TG-RL v2 update %d (%d/%d this run): initializing %d rollout envs",
+                "TG-RL v2 update %d (%d/%d this run): initializing %d rollout envs from %s",
                 update,
                 local_update + 1,
                 self._updates,
                 self._env_count,
+                "previous update best" if self._rollout_seed_chromosome is not None else "initial template",
             )
             envs = self._initialize_envs(update)
             for env in envs:
@@ -229,6 +254,7 @@ class TGRLPPOTrainer:
                     env.chromosome = evaluation.chromosome.model_copy(deep=True)
                     env.previous_score = evaluation.weighted_score
                     env.last_feedback = evaluation.feedback
+                    env.last_suite_feedback = evaluation.suite_feedback
                     if best is None or evaluation.weighted_score < best.weighted_score:
                         best = evaluation
                     if evaluation.weighted_score < self._best_score:
@@ -259,6 +285,17 @@ class TGRLPPOTrainer:
                 device=self._device,
                 rng=self._rng,
             )
+            update_candidates = [env.initial_evaluation for env in envs] + update_evaluations
+            if update_candidates:
+                update_best = min(update_candidates, key=lambda item: item.weighted_score)
+                self._rollout_seed_chromosome = update_best.chromosome.model_copy(deep=True)
+                logger.info(
+                    "TG-RL v2 update %d next seed set from update best: score=%.4f action=%s feasible=%s",
+                    update,
+                    update_best.weighted_score,
+                    update_best.action.key,
+                    update_best.feasible,
+                )
             self._persist_update(update, update_evaluations, metrics)
             metrics_history.append(
                 {
@@ -275,6 +312,7 @@ class TGRLPPOTrainer:
                 metrics_history,
                 previous_candidate_rows=previous_candidate_rows,
                 previous_update_rows=previous_update_rows,
+                previous_workload_rows=previous_workload_rows,
                 initial_best_score=curve_initial_best,
             )
             logger.info(
@@ -298,6 +336,7 @@ class TGRLPPOTrainer:
             metrics_history,
             previous_candidate_rows=previous_candidate_rows,
             previous_update_rows=previous_update_rows,
+            previous_workload_rows=previous_workload_rows,
             initial_best_score=curve_initial_best,
         )
         logger.info(
@@ -309,8 +348,47 @@ class TGRLPPOTrainer:
         )
         return TGRLPPOResult(history=history, transitions=all_transitions, best=best)
 
+    def _ensure_suite_baseline(self) -> None:
+        if self._suite_runner is None or self._suite_baseline is not None:
+            return
+        baseline_path = self._out_dir / "baseline_suite.json"
+        if baseline_path.exists():
+            try:
+                payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+                baseline = WorkloadSuiteBaseline.from_dict(payload)
+                if self._workload_suite is not None and baseline.suite_name != self._workload_suite.name:
+                    raise ValueError(f"baseline suite {baseline.suite_name!r} does not match {self._workload_suite.name!r}")
+                if not _baseline_is_usable(baseline, self._workload_suite):
+                    raise ValueError("baseline contains missing or failed workload makespans")
+                self._suite_baseline = baseline
+                logger.info("Loaded workload-suite baseline: %s", baseline_path)
+                return
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                logger.warning("Ignoring unreadable workload-suite baseline: %s", baseline_path)
+
+        baseline_dir = self._out_dir / "baseline_suite"
+        baseline_dir.mkdir(parents=True, exist_ok=True)
+        chromosome = self._initial_chromosome()
+        exported = self._exporter.export(chromosome, iteration=0)
+        dump_json(baseline_dir / "proposal.json", exported.proposal.to_dict())
+        dump_json(baseline_dir / "hardware_topology.json", exported.hardware_topology)
+        logger.info(
+            "Evaluating workload-suite baseline: suite=%s workloads=%d",
+            self._workload_suite.name if self._workload_suite is not None else "n/a",
+            len(self._workload_suite.workloads) if self._workload_suite is not None else 0,
+        )
+        feedback = self._suite_runner.run(
+            topology_path=baseline_dir / "hardware_topology.json",
+            out_dir=baseline_dir,
+            baseline=None,
+        )
+        self._suite_baseline = feedback.baseline
+        dump_json(baseline_path, self._suite_baseline.to_dict())
+        dump_json(baseline_dir / "suite_feedback.json", feedback.to_dict())
+
     def _initialize_envs(self, update: int) -> list[EnvState]:
-        chromosomes = [self._initial_chromosome() for _ in range(self._env_count)]
+        seed = self._rollout_seed_chromosome or self._initial_chromosome()
+        chromosomes = [seed.model_copy(deep=True) for _ in range(self._env_count)]
         evaluations = self._evaluate_initials(chromosomes, update)
         envs: list[EnvState] = []
         for env_id, evaluation in enumerate(evaluations):
@@ -319,6 +397,7 @@ class TGRLPPOTrainer:
                 chromosome=evaluation.chromosome.model_copy(deep=True),
                 previous_score=evaluation.weighted_score,
                 last_feedback=evaluation.feedback,
+                last_suite_feedback=evaluation.suite_feedback,
                 trajectory=[],
                 initial_evaluation=evaluation,
             )
@@ -379,7 +458,7 @@ class TGRLPPOTrainer:
                 search_space=self._space,
                 repairer=self._repairer,
                 exporter=self._exporter,
-                feedback=env.last_feedback,
+                feedback=env.last_suite_feedback or env.last_feedback,
                 current_repair=repair,
                 policy=None,
                 config=TGRLConfig(temperature=self._config.temperature, heuristic_weight=self._config.heuristic_weight),
@@ -391,6 +470,7 @@ class TGRLPPOTrainer:
                 repair=repair,
                 feedback=env.last_feedback,
                 masked_actions=masked_actions,
+                suite_feedback=env.last_suite_feedback,
                 current_score=env.previous_score,
                 best_score=best_score if best_score < float("inf") else env.previous_score,
                 update=update_position,
@@ -478,7 +558,7 @@ class TGRLPPOTrainer:
         dump_json(candidate_dir / "action.json", masked_action.action.to_dict())
         dump_json(candidate_dir / "candidate.json", masked_action.to_dict())
 
-        signature = repair.chromosome.signature()
+        signature = self._cache_signature(repair.chromosome)
         exported: ExportedHardware | None = None
         try:
             exported = self._exporter.export(repair.chromosome, iteration=update)
@@ -520,6 +600,7 @@ class TGRLPPOTrainer:
                 repair=repair,
                 exported=exported,
                 feedback=cached.feedback,
+                suite_feedback=cached.suite_feedback,
                 cache_hit=True,
             )
             self._write_evaluation(candidate_dir, copied)
@@ -548,6 +629,7 @@ class TGRLPPOTrainer:
             return evaluation
 
         feedback: ParsedPipelineFeedback | None = None
+        suite_feedback: MultiWorkloadFeedback | None = None
         messages = list(repair.messages)
         feasible = True
         logger.info(
@@ -558,19 +640,32 @@ class TGRLPPOTrainer:
             candidate_dir / "hardware_topology.json",
         )
         try:
-            feedback = self._pipeline.run(
-                topology_path=candidate_dir / "hardware_topology.json",
-                workload_path=self._workload_path,
-                out_dir=candidate_dir / "wrapper",
-            )
-            if not feedback.summary.get("success", False):
-                feasible = False
-                messages.append("mapper/simulator wrapper reported success=false")
+            if self._suite_runner is not None:
+                suite_feedback = self._suite_runner.run(
+                    topology_path=candidate_dir / "hardware_topology.json",
+                    out_dir=candidate_dir,
+                    baseline=self._suite_baseline,
+                )
+                feedback = suite_feedback.aggregate_feedback
+                if not suite_feedback.success:
+                    feasible = False
+                    messages.append("one or more workload-suite evaluations failed")
+            else:
+                if self._workload_path is None:
+                    raise ValueError("single-workload evaluation requires workload_path")
+                feedback = self._pipeline.run(
+                    topology_path=candidate_dir / "hardware_topology.json",
+                    workload_path=self._workload_path,
+                    out_dir=candidate_dir / "wrapper",
+                )
+                if not feedback.summary.get("success", False):
+                    feasible = False
+                    messages.append("mapper/simulator wrapper reported success=false")
         except Exception as exc:
             feasible = False
             messages.append(f"pipeline failed: {exc}")
 
-        objectives = self._objectives(repair, feedback, feasible)
+        objectives = self._objectives(repair, feedback, feasible, suite_feedback=suite_feedback)
         evaluation = TGRLEvaluation(
             episode=update,
             step=step,
@@ -583,6 +678,7 @@ class TGRLPPOTrainer:
             repair=repair,
             exported=exported,
             feedback=feedback,
+            suite_feedback=suite_feedback,
         )
         self._write_evaluation(candidate_dir, evaluation)
         self._store_cached_evaluation(signature, evaluation)
@@ -636,6 +732,8 @@ class TGRLPPOTrainer:
         repair: RepairReport,
         feedback: ParsedPipelineFeedback | None,
         feasible: bool,
+        *,
+        suite_feedback: MultiWorkloadFeedback | None = None,
     ) -> tuple[float, float, float, float, float, float]:
         if feedback is None:
             return (
@@ -647,8 +745,13 @@ class TGRLPPOTrainer:
                 1_000_000_000.0,
             )
         penalty = 0.0 if feasible else 1_000_000_000.0
+        primary_performance = (
+            suite_feedback.suite_makespan_score * 10_000.0
+            if suite_feedback is not None
+            else feedback.makespan_us
+        )
         return (
-            feedback.makespan_us + penalty,
+            primary_performance + penalty,
             repair.estimated_cost,
             repair.estimated_power_watts,
             feedback.max_link_utilization + (1_000_000.0 if not feasible else 0.0),
@@ -689,7 +792,9 @@ class TGRLPPOTrainer:
 
     def _write_evaluation(self, candidate_dir: Path, evaluation: TGRLEvaluation) -> None:
         dump_json(candidate_dir / "score.json", evaluation.to_summary())
-        if evaluation.feedback is not None:
+        if evaluation.suite_feedback is not None:
+            dump_json(candidate_dir / "suite_feedback.json", evaluation.suite_feedback.to_dict())
+        elif evaluation.feedback is not None:
             dump_json(candidate_dir / "feedback.json", _feedback_to_dict(evaluation.feedback))
 
     def _persist_step(self, update: int, step: int, evaluations: list[TGRLEvaluation]) -> None:
@@ -727,8 +832,17 @@ class TGRLPPOTrainer:
                 "env_count": self._env_count,
                 "evaluations": len(history),
                 "transitions": len(transitions),
+                "best_score": best.weighted_score,
+                "best_feasible": best.feasible,
+                "best_action": best.action.key,
                 "global_best_score": self._best_score,
+                "workload_suite": self._workload_suite.to_dict() if self._workload_suite is not None else None,
+                "baseline_suite": self._suite_baseline.to_dict() if self._suite_baseline is not None else None,
                 "best": best.to_summary(),
+                "per_workload_single_task_scores": per_workload_single_task_scores(
+                    best,
+                    self._space.objective_weights,
+                ),
             },
         )
         if best.exported is not None:
@@ -742,6 +856,7 @@ class TGRLPPOTrainer:
         *,
         previous_candidate_rows: list[dict[str, Any]],
         previous_update_rows: list[dict[str, Any]],
+        previous_workload_rows: list[dict[str, Any]],
         initial_best_score: float,
     ) -> None:
         curve_dir = self._out_dir / "curves"
@@ -755,11 +870,18 @@ class TGRLPPOTrainer:
             history,
             initial_best_score=initial_best_score,
         )
+        workload_rows = previous_workload_rows + _workload_score_rows(
+            history,
+            ordinal_offset=len(previous_candidate_rows),
+            weights=self._space.objective_weights,
+        )
         dump_json(curve_dir / "candidate_scores.json", {"rows": candidate_rows})
         dump_json(curve_dir / "update_scores.json", {"rows": update_rows})
+        dump_json(curve_dir / "workload_scores.json", {"rows": workload_rows})
         dump_json(curve_dir / "ppo_metrics.json", {"rows": metrics_history})
         _write_csv(curve_dir / "candidate_scores.csv", candidate_rows)
         _write_csv(curve_dir / "update_scores.csv", update_rows)
+        _write_csv(curve_dir / "workload_scores.csv", workload_rows)
         _write_csv(curve_dir / "ppo_metrics.csv", metrics_history)
         _write_svg_lines(
             curve_dir / "score_curve.svg",
@@ -770,6 +892,8 @@ class TGRLPPOTrainer:
                 ("best_score", [(float(row["update"]), float(row["best_score"])) for row in update_rows]),
                 ("mean_score", [(float(row["update"]), float(row["mean_score"])) for row in update_rows]),
                 ("global_best_score", [(float(row["update"]), float(row["global_best_score"])) for row in update_rows]),
+                ("best_geomean_speedup", [(float(row["update"]), float(row.get("best_geomean_speedup", 1.0))) for row in update_rows]),
+                ("best_min_speedup", [(float(row["update"]), float(row.get("best_min_speedup", 1.0))) for row in update_rows]),
             ],
         )
         _write_svg_lines(
@@ -794,6 +918,10 @@ class TGRLPPOTrainer:
             payload["update"] = update
             payload["score"] = evaluation.weighted_score
             payload["feasible"] = evaluation.feasible
+            if evaluation.suite_feedback is not None:
+                payload["geomean_speedup"] = evaluation.suite_feedback.geomean_speedup
+                payload["min_speedup"] = evaluation.suite_feedback.min_speedup
+                payload["speedup_cv"] = evaluation.suite_feedback.speedup_cv
             handle.write(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
 
     def _save_checkpoint(self, path: Path, *, update: int) -> None:
@@ -808,6 +936,12 @@ class TGRLPPOTrainer:
                 "rng_state": self._rng.getstate(),
                 "torch_rng_state": torch.random.get_rng_state(),
                 "seen_signatures": sorted(self._seen_signatures),
+                "suite_baseline": self._suite_baseline.to_dict() if self._suite_baseline is not None else None,
+                "rollout_seed_chromosome": (
+                    self._rollout_seed_chromosome.to_dict()
+                    if self._rollout_seed_chromosome is not None
+                    else None
+                ),
             },
             path,
         )
@@ -841,6 +975,23 @@ class TGRLPPOTrainer:
             torch.random.set_rng_state(checkpoint["torch_rng_state"].detach().cpu())
         if "seen_signatures" in checkpoint:
             self._seen_signatures = set(str(item) for item in checkpoint["seen_signatures"])
+        if checkpoint.get("suite_baseline"):
+            baseline = WorkloadSuiteBaseline.from_dict(checkpoint["suite_baseline"])
+            if (
+                (self._workload_suite is None or baseline.suite_name == self._workload_suite.name)
+                and _baseline_is_usable(baseline, self._workload_suite)
+            ):
+                self._suite_baseline = baseline
+        if checkpoint.get("rollout_seed_chromosome"):
+            self._rollout_seed_chromosome = Chromosome.model_validate(checkpoint["rollout_seed_chromosome"])
+
+    def _cache_signature(self, chromosome: Chromosome) -> str:
+        signature = chromosome.signature()
+        if self._workload_suite is not None:
+            return f"{signature}|suite={self._workload_suite.signature}"
+        if self._workload_path is not None:
+            return f"{signature}|workload={self._workload_path}"
+        return signature
 
     def _cached_evaluation(self, signature: str) -> TGRLEvaluation | None:
         with self._cache_lock:
@@ -871,6 +1022,96 @@ def _initial_action() -> Any:
     return GraphEditAction(action_type="change_inter_rack_topology", target="initial")
 
 
+def _baseline_is_usable(baseline: WorkloadSuiteBaseline, suite: WorkloadSuite | None) -> bool:
+    expected = [item.name for item in suite.workloads] if suite is not None else list(baseline.makespans_us)
+    if not expected:
+        return False
+    for name in expected:
+        value = baseline.makespans_us.get(name)
+        if value is None or value <= 0 or value == 1_000_000_000.0:
+            return False
+    return True
+
+
+def per_workload_single_task_scores(
+    evaluation: TGRLEvaluation,
+    weights: SearchObjectiveWeights,
+) -> list[dict[str, Any]]:
+    if evaluation.suite_feedback is None:
+        return []
+    rows: list[dict[str, Any]] = []
+    for workload_index, run in enumerate(evaluation.suite_feedback.runs):
+        objectives = _single_workload_objectives(evaluation, run)
+        feasible = evaluation.repair.feasible and run.success
+        rows.append(
+            {
+                "workload_index": workload_index,
+                "workload": run.name,
+                "success": run.success,
+                "single_task_score": _weighted_score_from_objectives(
+                    objectives,
+                    weights=weights,
+                    feasible=feasible,
+                    penalty=evaluation.repair.penalty,
+                ),
+                "makespan_us": run.makespan_us,
+                "estimated_cost": objectives[1],
+                "estimated_power_watts": objectives[2],
+                "max_link_utilization": objectives[3],
+                "max_queue_delay_ns": objectives[4],
+                "remote_memory_contention_ns": objectives[5],
+                "baseline_makespan_us": run.effective_baseline_makespan_us,
+                "speedup": run.speedup,
+            }
+        )
+    return rows
+
+
+def _single_workload_objectives(
+    evaluation: TGRLEvaluation,
+    run: WorkloadRunFeedback,
+) -> tuple[float, float, float, float, float, float]:
+    repair = evaluation.repair
+    if run.feedback is None:
+        return (
+            1_000_000_000.0 + repair.penalty,
+            repair.estimated_cost,
+            repair.estimated_power_watts,
+            1_000_000.0,
+            1_000_000_000.0,
+            1_000_000_000.0,
+        )
+    penalty = 0.0 if repair.feasible and run.success else 1_000_000_000.0
+    return (
+        run.feedback.makespan_us + penalty,
+        repair.estimated_cost,
+        repair.estimated_power_watts,
+        run.feedback.max_link_utilization + (1_000_000.0 if penalty else 0.0),
+        run.feedback.max_queue_delay_ns + penalty,
+        run.feedback.remote_memory_contention_ns + penalty,
+    )
+
+
+def _weighted_score_from_objectives(
+    objectives: tuple[float, float, float, float, float, float],
+    *,
+    weights: SearchObjectiveWeights,
+    feasible: bool,
+    penalty: float,
+) -> float:
+    score = (
+        weights.makespan * (objectives[0] / 10_000.0)
+        + weights.cost * (objectives[1] / 1_000_000.0)
+        + weights.power * (objectives[2] / 100_000.0)
+        + weights.max_link_utilization * objectives[3]
+        + weights.max_queue_delay * (objectives[4] / 1_000_000.0)
+        + weights.remote_memory_contention * (objectives[5] / 1_000_000.0)
+    )
+    if not feasible:
+        score += 1_000_000.0 + penalty
+    return score
+
+
 def _candidate_score_rows(
     history: list[TGRLEvaluation],
     *,
@@ -898,8 +1139,66 @@ def _candidate_score_rows(
                 "max_link_utilization": evaluation.objectives[3],
                 "max_queue_delay_ns": evaluation.objectives[4],
                 "remote_memory_contention_ns": evaluation.objectives[5],
+                "geomean_speedup": (
+                    evaluation.suite_feedback.geomean_speedup if evaluation.suite_feedback is not None else 1.0
+                ),
+                "min_speedup": (
+                    evaluation.suite_feedback.min_speedup if evaluation.suite_feedback is not None else 1.0
+                ),
+                "speedup_cv": (
+                    evaluation.suite_feedback.speedup_cv if evaluation.suite_feedback is not None else 0.0
+                ),
             }
         )
+    return rows
+
+
+def _workload_score_rows(
+    history: list[TGRLEvaluation],
+    *,
+    ordinal_offset: int = 0,
+    weights: SearchObjectiveWeights | None = None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for ordinal, evaluation in enumerate(history):
+        if evaluation.suite_feedback is None:
+            continue
+        single_task_scores = (
+            {
+                item["workload"]: item
+                for item in per_workload_single_task_scores(evaluation, weights)
+            }
+            if weights is not None
+            else {}
+        )
+        for workload_index, run in enumerate(evaluation.suite_feedback.runs):
+            row = {
+                "ordinal": ordinal_offset + ordinal,
+                "update": evaluation.episode,
+                "step": evaluation.step,
+                "env": evaluation.candidate_index,
+                "workload_index": workload_index,
+                "workload": run.name,
+                "action": evaluation.action.key,
+                "feasible": evaluation.feasible,
+                "success": run.success,
+                "aggregate_score": evaluation.weighted_score,
+                "suite_makespan_score": evaluation.suite_feedback.suite_makespan_score,
+                "geomean_speedup": evaluation.suite_feedback.geomean_speedup,
+                "weight": run.weight,
+                "makespan_us": run.makespan_us,
+                "baseline_makespan_us": run.effective_baseline_makespan_us,
+                "normalized_score": run.normalized_score,
+                "speedup": run.speedup,
+                "weighted_log_score": run.weighted_log_score,
+            }
+            if run.name in single_task_scores:
+                score_row = single_task_scores[run.name]
+                row["single_task_score"] = score_row["single_task_score"]
+                row["single_task_max_link_utilization"] = score_row["max_link_utilization"]
+                row["single_task_max_queue_delay_ns"] = score_row["max_queue_delay_ns"]
+                row["single_task_remote_memory_contention_ns"] = score_row["remote_memory_contention_ns"]
+            rows.append(row)
     return rows
 
 
@@ -933,6 +1232,20 @@ def _update_score_rows(
                 "best_max_link_utilization": best.objectives[3],
                 "best_max_queue_delay_ns": best.objectives[4],
                 "best_remote_memory_contention_ns": best.objectives[5],
+                "best_geomean_speedup": (
+                    best.suite_feedback.geomean_speedup if best.suite_feedback is not None else 1.0
+                ),
+                "best_min_speedup": (
+                    best.suite_feedback.min_speedup if best.suite_feedback is not None else 1.0
+                ),
+                "mean_geomean_speedup": _mean(
+                    item.suite_feedback.geomean_speedup if item.suite_feedback is not None else 1.0
+                    for item in values
+                ),
+                "mean_min_speedup": _mean(
+                    item.suite_feedback.min_speedup if item.suite_feedback is not None else 1.0
+                    for item in values
+                ),
             }
         )
     return rows
@@ -942,7 +1255,11 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     if not rows:
         path.write_text("", encoding="utf-8")
         return
-    fieldnames = list(rows[0].keys())
+    fieldnames: list[str] = []
+    for row in rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()

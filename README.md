@@ -6,6 +6,7 @@ Production-oriented Python framework for iterative optimization of future SuperP
 - **Inner loop**: software task-to-node mapping and placement strategy.
 - **Simulator coupling**: JSONC-safe file interface for proposal/feedback exchange.
 - **Constraint handling**: thermal, budget, and power-aware feasibility checks.
+- **Search policies**: constraint-aware evolutionary search, TCRO continuous relaxation, and TG-RL masked graph-edit RL.
 
 ## Architecture
 
@@ -20,11 +21,26 @@ Production-oriented Python framework for iterative optimization of future SuperP
 │   │   ├── hardware.py
 │   │   └── workload.py
 │   ├── optimizer
+│   │   ├── chromosome.py
 │   │   ├── constraints.py
+│   │   ├── evolutionary.py
+│   │   ├── exporter.py
+│   │   ├── feedback_parser.py
 │   │   ├── inner_loop.py
 │   │   ├── objective.py
 │   │   ├── orchestrator.py
-│   │   └── outer_loop.py
+│   │   ├── outer_loop.py
+│   │   ├── pipeline_client.py
+│   │   ├── repair.py
+│   │   ├── search_space.py
+│   │   ├── tcro.py
+│   │   ├── tgrl.py
+│   │   ├── tgrl_v2
+│   │   │   ├── model.py
+│   │   │   ├── observation.py
+│   │   │   ├── ppo.py
+│   │   │   └── trainer.py
+│   │   └── workload_suite.py
 │   ├── simulator
 │   │   ├── file_adapter.py
 │   │   └── interface.py
@@ -189,6 +205,72 @@ In v2, `episodes` are PPO updates, `steps-per-episode` is rollout length, and
 `update_*/env_*/step_*` artifacts, `ppo_metrics.json`, and
 `checkpoints/policy_latest.pt`.
 
+The v2 policy is deliberately constrained. It does not generate arbitrary
+graphs. For each rollout state, TG-RL first enumerates graph edits and masks out
+anything that fails repair/export checks. The GNN policy then chooses among the
+remaining legal actions:
+
+- The observation graph contains a global node, rack nodes, slot nodes,
+  rack-slot edges, inter-rack edges, budget/power margins, current and best
+  score, rollout progress, simulator telemetry pressure, and optional workload
+  suite speedup features.
+- The actor scores each masked action from the graph embedding, the action
+  target embedding, the action feature vector, and the telemetry heuristic
+  logit.
+- The action distribution is `actor_logits + heuristic_weight *
+  heuristic_logits`, so PPO learns a correction over the telemetry prior rather
+  than exploring from scratch.
+- The reward is the normalized weighted-score improvement. Infeasible
+  candidates and duplicate candidates are penalized; new global-best candidates
+  receive a small bonus; rewards are clipped before PPO.
+- PPO uses GAE, clipped policy loss, value loss, entropy regularization, and a
+  KL penalty toward the telemetry prior.
+
+v2 also supports multi-workload optimization:
+
+```bash
+codesign-opt tgrl \
+  --catalog ./examples/component_catalog_tcro_latent_rack.json \
+  --space ./examples/search_space_tcro_latent_rack.json \
+  --workload-suite ./examples/workload_suites/small_mixed_suite.json \
+  --episodes 4 \
+  --steps-per-episode 4 \
+  --mode v2 \
+  --concurrency 2 \
+  --ppo-epochs 2 \
+  --device auto \
+  --out ./artifacts/tgrl_v2_suite_run
+```
+
+For workload suites, the trainer evaluates or loads `baseline_suite.json`, then
+optimizes the weighted geometric mean speedup by using
+`suite_makespan_score = 1 / geomean_speedup` as the primary performance term.
+It writes per-workload feedback and curve files under `curves/`, including JSON,
+CSV, and SVG summaries. The final CLI output and `tgrl_summary.json` report a
+per-workload `single_task_score` for the aggregate-best topology. That score is
+recomputed with the same weighted-score formula used by single-workload TG-RL,
+so it is comparable to a single-workload run's `Best score` for the same
+workload. It is report-only and does not change the multi-workload optimization
+objective.
+
+Resume training with:
+
+```bash
+codesign-opt tgrl \
+  --catalog ./examples/component_catalog_tcro_latent_rack.json \
+  --space ./examples/search_space_tcro_latent_rack.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --mode v2 \
+  --resume ./artifacts/tgrl_v2_run/checkpoints/policy_latest.pt \
+  --episodes 2 \
+  --steps-per-episode 4 \
+  --out ./artifacts/tgrl_v2_run
+```
+
+The checkpoint stores compatible model weights, optimizer state, RNG state,
+seen candidate signatures, workload-suite baseline, global best score, and the
+best chromosome from the previous update as the next rollout seed.
+
 ## Key Design Notes
 
 - The sample simulator files are **JSONC** (comments included), so parser supports inline `// ...` comments.
@@ -196,3 +278,6 @@ In v2, `episodes` are PPO updates, `steps-per-episode` is rollout length, and
 - The inner loop and outer loop are decoupled behind stable interfaces for easy replacement with learned policies or advanced solvers.
 - The heuristic search path keeps topology search at rack/template level instead
   of directly enumerating a large adjacency matrix.
+- TG-RL v2 remains a black-box optimizer over real mapper/simulator evaluations;
+  simulator telemetry guides sampling, but the simulator itself is not treated as
+  differentiable.

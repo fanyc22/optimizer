@@ -14,11 +14,12 @@ from codesign_optimizer.optimizer.tgrl import (
     TelemetryContext,
     telemetry_context,
 )
+from codesign_optimizer.optimizer.workload_suite import MultiWorkloadFeedback
 
 
 NODE_FEATURE_DIM = 23
 EDGE_FEATURE_DIM = 8
-GLOBAL_FEATURE_DIM = 10
+GLOBAL_FEATURE_DIM = 15
 ACTION_FEATURE_DIM = 30
 
 
@@ -60,6 +61,7 @@ class GraphObservationBuilder:
         repair: RepairReport,
         feedback: ParsedPipelineFeedback | None,
         masked_actions: list[MaskedAction],
+        suite_feedback: MultiWorkloadFeedback | None = None,
         current_score: float,
         best_score: float,
         update: int,
@@ -67,7 +69,7 @@ class GraphObservationBuilder:
         total_updates: int,
         rollout_steps: int,
     ) -> GraphObservation:
-        context = telemetry_context(feedback, repair, self._space)
+        context = telemetry_context(suite_feedback or feedback, repair, self._space)
         node_features: list[list[float]] = []
         edge_index: list[list[int]] = [[], []]
         edge_features: list[list[float]] = []
@@ -82,6 +84,7 @@ class GraphObservationBuilder:
             step=step,
             total_updates=total_updates,
             rollout_steps=rollout_steps,
+            suite_feedback=suite_feedback,
         )
         node_features.append(_pad([1.0, 0.0, 0.0, 0.0, 0.0, 0.0] + global_features[:17], NODE_FEATURE_DIM))
         node_lookup[("global", "")] = 0
@@ -158,6 +161,7 @@ class GraphObservationBuilder:
         step: int,
         total_updates: int,
         rollout_steps: int,
+        suite_feedback: MultiWorkloadFeedback | None,
     ) -> list[float]:
         cost_limit = max(1.0, self._space.limits.max_total_cost)
         power_limit = max(1.0, self._space.limits.max_peak_power_watts)
@@ -173,6 +177,11 @@ class GraphObservationBuilder:
                 context.network_utilization,
                 context.queue_pressure,
                 context.remote_memory_pressure,
+                min(32.0, float(len(suite_feedback.runs))) / 32.0 if suite_feedback is not None else 1.0 / 32.0,
+                suite_feedback.geomean_speedup if suite_feedback is not None else 1.0,
+                suite_feedback.min_speedup if suite_feedback is not None else 1.0,
+                suite_feedback.speedup_cv if suite_feedback is not None else 0.0,
+                _worst_workload_weight(suite_feedback),
             ],
             GLOBAL_FEATURE_DIM,
         )
@@ -380,6 +389,13 @@ def _node_kind(spec: Any) -> str:
     if "switch" in role:
         return "switch"
     return ""
+
+
+def _worst_workload_weight(suite_feedback: MultiWorkloadFeedback | None) -> float:
+    if suite_feedback is None or not suite_feedback.runs:
+        return 1.0
+    worst = min(suite_feedback.runs, key=lambda item: item.speedup)
+    return float(worst.weight)
 
 
 def _pad(values: list[float], size: int) -> list[float]:
