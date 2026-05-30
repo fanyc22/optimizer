@@ -16,6 +16,7 @@ from codesign_optimizer.optimizer.search_space import SearchSpace
 from codesign_optimizer.optimizer.tgrl import (
     GraphEditAction,
     LinearPolicy,
+    TOPOLOGY_CHANGING_ACTION_TYPES,
     TGRLConfig,
     TGRLSearchRunner,
     TrajectoryItem,
@@ -299,6 +300,70 @@ def test_action_enumerator_and_mask_include_valid_graph_edits() -> None:
 
     assert masked
     assert all(item.repair.feasible for item in masked)
+
+
+def test_freeze_topology_masks_topology_changing_actions() -> None:
+    library = _library()
+    space_payload = _space().model_dump(mode="json")
+    space_payload["exhaustive"] = {
+        "slot_options": [
+            {"node_type": "GPU_SMALL", "link_type": "FAST", "link_qty": 1},
+            {"node_type": "CPU", "link_type": "FAST", "link_qty": 1},
+        ]
+    }
+    space = SearchSpace.model_validate(space_payload)
+    chromosome = chromosome_from_template(space.templates[0])
+    repairer = CandidateRepairer(library, space)
+    masked = build_masked_actions(
+        chromosome,
+        component_library=library,
+        search_space=space,
+        repairer=repairer,
+        exporter=HardwareTopologyExporter(library),
+        feedback=_feedback(compute=0.95),
+        current_repair=repairer.repair_and_validate(chromosome),
+        policy=None,
+        config=TGRLConfig(temperature=1.0, freeze_topology=True),
+    )
+
+    assert masked
+    assert not any(item.action.action_type in TOPOLOGY_CHANGING_ACTION_TYPES for item in masked)
+    assert {item.action.action_type for item in masked} <= {
+        "replace_node_type",
+        "upgrade_node",
+        "downgrade_node",
+    }
+    assert all(item.action.target in {"GPU_SMALL", "CPU"} for item in masked)
+
+
+def test_node_replacement_applies_exhaustive_link_option() -> None:
+    library = _library()
+    space_payload = _space().model_dump(mode="json")
+    rack = space_payload["templates"][0]["racks"][0]
+    rack["slots"][0]["node_type"] = "CPU"
+    rack["slots"][0]["link_type"] = "CXL"
+    space_payload["exhaustive"] = {
+        "slot_options": [
+            {"node_type": "GPU_FAST", "link_type": "FAST", "link_qty": 1},
+            {"node_type": "CPU", "link_type": "CXL", "link_qty": 1},
+        ]
+    }
+    space = SearchSpace.model_validate(space_payload)
+    chromosome = chromosome_from_template(space.templates[0])
+
+    updated = apply_graph_edit_action(
+        chromosome,
+        GraphEditAction(
+            "replace_node_type",
+            rack_id="rack0",
+            resource="slot0",
+            target="GPU_FAST",
+        ),
+        search_space=space,
+    )
+
+    assert updated.racks[0].slots[0].node_type == "GPU_FAST"
+    assert updated.racks[0].slots[0].link_type == "FAST"
 
 
 def test_link_actions_respect_rack_hierarchy_scopes() -> None:

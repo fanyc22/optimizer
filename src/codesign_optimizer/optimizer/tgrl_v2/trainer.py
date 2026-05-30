@@ -21,6 +21,11 @@ from codesign_optimizer.optimizer.exporter import ExportedHardware, HardwareTopo
 from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback
 from codesign_optimizer.optimizer.pipeline_client import PipelineClient
 from codesign_optimizer.optimizer.repair import CandidateRepairer, RepairReport
+from codesign_optimizer.optimizer.scoring import (
+    single_workload_objectives as score_single_workload_objectives,
+    tgrl_v2_objectives,
+    weighted_score_from_objectives,
+)
 from codesign_optimizer.optimizer.search_space import SearchObjectiveWeights, SearchSpace
 from codesign_optimizer.optimizer.tgrl import (
     MaskedAction,
@@ -59,6 +64,7 @@ class TGRLPPOConfig(BaseModel):
     duplicate_penalty: float = Field(default=0.05, ge=0.0)
     best_improvement_bonus: float = Field(default=0.1, ge=0.0)
     reward_clip: float = Field(default=5.0, gt=0.0)
+    freeze_topology: bool = False
     device: str = "auto"
     resume: Path | None = None
 
@@ -461,7 +467,11 @@ class TGRLPPOTrainer:
                 feedback=env.last_suite_feedback or env.last_feedback,
                 current_repair=repair,
                 policy=None,
-                config=TGRLConfig(temperature=self._config.temperature, heuristic_weight=self._config.heuristic_weight),
+                config=TGRLConfig(
+                    temperature=self._config.temperature,
+                    heuristic_weight=self._config.heuristic_weight,
+                    freeze_topology=self._config.freeze_topology,
+                ),
             )
             if not masked_actions:
                 continue
@@ -735,28 +745,11 @@ class TGRLPPOTrainer:
         *,
         suite_feedback: MultiWorkloadFeedback | None = None,
     ) -> tuple[float, float, float, float, float, float]:
-        if feedback is None:
-            return (
-                1_000_000_000.0 + repair.penalty,
-                repair.estimated_cost,
-                repair.estimated_power_watts,
-                1_000_000.0,
-                1_000_000_000.0,
-                1_000_000_000.0,
-            )
-        penalty = 0.0 if feasible else 1_000_000_000.0
-        primary_performance = (
-            suite_feedback.suite_makespan_score * 10_000.0
-            if suite_feedback is not None
-            else feedback.makespan_us
-        )
-        return (
-            primary_performance + penalty,
-            repair.estimated_cost,
-            repair.estimated_power_watts,
-            feedback.max_link_utilization + (1_000_000.0 if not feasible else 0.0),
-            feedback.max_queue_delay_ns + penalty,
-            feedback.remote_memory_contention_ns + penalty,
+        return tgrl_v2_objectives(
+            repair,
+            feedback,
+            feasible,
+            suite_feedback=suite_feedback,
         )
 
     def _weighted_score(
@@ -765,18 +758,12 @@ class TGRLPPOTrainer:
         feasible: bool,
         penalty: float,
     ) -> float:
-        weights: SearchObjectiveWeights = self._space.objective_weights
-        score = (
-            weights.makespan * (objectives[0] / 10_000.0)
-            + weights.cost * (objectives[1] / 1_000_000.0)
-            + weights.power * (objectives[2] / 100_000.0)
-            + weights.max_link_utilization * objectives[3]
-            + weights.max_queue_delay * (objectives[4] / 1_000_000.0)
-            + weights.remote_memory_contention * (objectives[5] / 1_000_000.0)
+        return weighted_score_from_objectives(
+            objectives,
+            weights=self._space.objective_weights,
+            feasible=feasible,
+            penalty=penalty,
         )
-        if not feasible:
-            score += 1_000_000.0 + penalty
-        return score
 
     def _reward(self, *, previous_score: float, new_score: float, feasible: bool, signature: str) -> float:
         scale = max(1.0, abs(previous_score))
@@ -1071,24 +1058,10 @@ def _single_workload_objectives(
     evaluation: TGRLEvaluation,
     run: WorkloadRunFeedback,
 ) -> tuple[float, float, float, float, float, float]:
-    repair = evaluation.repair
-    if run.feedback is None:
-        return (
-            1_000_000_000.0 + repair.penalty,
-            repair.estimated_cost,
-            repair.estimated_power_watts,
-            1_000_000.0,
-            1_000_000_000.0,
-            1_000_000_000.0,
-        )
-    penalty = 0.0 if repair.feasible and run.success else 1_000_000_000.0
-    return (
-        run.feedback.makespan_us + penalty,
-        repair.estimated_cost,
-        repair.estimated_power_watts,
-        run.feedback.max_link_utilization + (1_000_000.0 if penalty else 0.0),
-        run.feedback.max_queue_delay_ns + penalty,
-        run.feedback.remote_memory_contention_ns + penalty,
+    return score_single_workload_objectives(
+        evaluation.repair,
+        run.feedback,
+        evaluation.repair.feasible and run.success,
     )
 
 
@@ -1099,17 +1072,12 @@ def _weighted_score_from_objectives(
     feasible: bool,
     penalty: float,
 ) -> float:
-    score = (
-        weights.makespan * (objectives[0] / 10_000.0)
-        + weights.cost * (objectives[1] / 1_000_000.0)
-        + weights.power * (objectives[2] / 100_000.0)
-        + weights.max_link_utilization * objectives[3]
-        + weights.max_queue_delay * (objectives[4] / 1_000_000.0)
-        + weights.remote_memory_contention * (objectives[5] / 1_000_000.0)
+    return weighted_score_from_objectives(
+        objectives,
+        weights=weights,
+        feasible=feasible,
+        penalty=penalty,
     )
-    if not feasible:
-        score += 1_000_000.0 + penalty
-    return score
 
 
 def _candidate_score_rows(

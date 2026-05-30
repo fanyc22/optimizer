@@ -62,6 +62,23 @@ class TGRLConfig(BaseModel):
     kl_weight: float = Field(default=0.05, ge=0)
     greedy: bool = False
     duplicate_penalty: float = Field(default=0.05, ge=0)
+    freeze_topology: bool = False
+
+
+TOPOLOGY_CHANGING_ACTION_TYPES: set[ActionType] = {
+    "add_node_to_slot",
+    "remove_node_from_slot",
+    "change_intra_rack_topology",
+    "upgrade_intra_rack_link",
+    "downgrade_intra_rack_link",
+    "change_inter_rack_topology",
+    "upgrade_inter_rack_link",
+    "downgrade_inter_rack_link",
+    "activate_optional_rack",
+    "deactivate_optional_rack",
+    "add_rack_from_template",
+    "remove_rack",
+}
 
 
 @dataclass(frozen=True)
@@ -904,6 +921,8 @@ def build_masked_actions(
         component_library=component_library,
         search_space=search_space,
     ):
+        if not _action_allowed_by_config(action, search_space=search_space, config=config):
+            continue
         candidate = apply_graph_edit_action(chromosome, action, search_space=search_space)
         repair = repairer.repair_and_validate(candidate)
         if not repair.feasible:
@@ -943,6 +962,23 @@ def build_masked_actions(
         item.policy_prob = probs.get(item.action.key, 0.0)
         item.logprob = math.log(max(1e-12, item.policy_prob))
     return actions
+
+
+def _action_allowed_by_config(
+    action: GraphEditAction,
+    *,
+    search_space: SearchSpace,
+    config: TGRLConfig,
+) -> bool:
+    if not config.freeze_topology:
+        return True
+    if action.action_type in TOPOLOGY_CHANGING_ACTION_TYPES:
+        return False
+    if action.action_type in {"replace_node_type", "upgrade_node", "downgrade_node"}:
+        allowed_node_types = _exhaustive_slot_node_types(search_space)
+        if allowed_node_types and action.target not in allowed_node_types:
+            return False
+    return True
 
 
 def apply_graph_edit_action(
@@ -1003,6 +1039,8 @@ def apply_graph_edit_action(
         slot = _find_slot(rack, action.resource)
         if slot is not None and slot.node_type:
             slot.node_type = action.target
+            if search_space is not None:
+                _apply_exhaustive_slot_link_option(slot, action.target, search_space)
         return result
     if action.action_type == "change_intra_rack_topology" and rack is not None:
         rack.intra_rack_topology = action.target
@@ -1262,6 +1300,25 @@ def _find_rack_archetype(search_space: SearchSpace, name: str) -> Any | None:
         if archetype.name == name:
             return archetype
     return None
+
+
+def _exhaustive_slot_node_types(search_space: SearchSpace) -> set[str]:
+    return {
+        option.node_type
+        for option in search_space.exhaustive.slot_options
+        if option.node_type is not None
+    }
+
+
+def _apply_exhaustive_slot_link_option(slot: Any, node_type: str, search_space: SearchSpace) -> None:
+    for option in search_space.exhaustive.slot_options:
+        if option.node_type != node_type:
+            continue
+        if option.link_type is not None:
+            slot.link_type = option.link_type
+        if option.link_qty is not None:
+            slot.link_qty = option.link_qty
+        return
 
 
 def _next_dynamic_rack_id(chromosome: Chromosome, archetype_name: str) -> str:

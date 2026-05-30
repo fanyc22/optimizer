@@ -100,6 +100,35 @@ class EvaluationSettings(BaseModel):
     repo_root: Path | None = None
 
 
+class ExhaustiveSlotOption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_type: str | None = None
+    link_type: str | None = None
+    link_qty: int | None = Field(default=None, ge=1)
+
+
+class ExhaustiveSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slot_options: list[ExhaustiveSlotOption] = Field(default_factory=list)
+    intra_rack_topologies: list[str] | None = None
+    intra_rack_link_types: list[str] | None = None
+    intra_rack_link_qty: list[int] | None = None
+    inter_rack_topologies: list[str] | None = None
+    inter_rack_link_types: list[str] | None = None
+    inter_rack_link_qty: list[int] | None = None
+    max_candidates: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_exhaustive_settings(self) -> "ExhaustiveSettings":
+        for field_name in ("intra_rack_link_qty", "inter_rack_link_qty"):
+            values = getattr(self, field_name)
+            if values is not None and any(value < 1 for value in values):
+                raise ValueError(f"{field_name} values must be >= 1")
+        return self
+
+
 RackRole = Literal["compute", "memory", "hybrid"]
 RackOrigin = Literal["seed", "dynamic"]
 FabricMode = Literal["none", "ring", "fully_connected", "switch"]
@@ -264,6 +293,7 @@ class SearchSpace(BaseModel):
     limits: SearchLimits = Field(default_factory=SearchLimits)
     objective_weights: SearchObjectiveWeights = Field(default_factory=SearchObjectiveWeights)
     evaluation: EvaluationSettings = Field(default_factory=EvaluationSettings)
+    exhaustive: ExhaustiveSettings = Field(default_factory=ExhaustiveSettings)
 
     @model_validator(mode="after")
     def validate_templates(self) -> "SearchSpace":

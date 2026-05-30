@@ -271,6 +271,45 @@ The checkpoint stores compatible model weights, optimizer state, RNG state,
 seen candidate signatures, workload-suite baseline, global best score, and the
 best chromosome from the previous update as the next rollout seed.
 
+For apples-to-apples comparison with a fixed-topology exhaustive run, add
+`--freeze-topology` to a TG-RL command. This masks graph edits that change rack
+count, slot occupancy, or fabric topology, leaving only node-type substitutions
+on already occupied slots. When the search space defines
+`exhaustive.slot_options`, frozen-topology TG-RL also restricts replacement
+targets to those node types and applies any link type/quantity specified by the
+selected slot option.
+
+## Exhaustive Finite Search
+
+For very small spaces, use the exhaustive runner to evaluate every candidate
+once and report the global optimum under the same weighted-score formula used by
+TG-RL v2 single-workload runs:
+
+```bash
+codesign-opt exhaustive \
+  --catalog ./examples/component_catalog_tcro_latent_rack.json \
+  --space ./examples/search_space_4rack_exhaustive_tiny.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --concurrency 4 \
+  --out ./artifacts/exhaustive_tiny_run
+```
+
+The tiny example fixes four racks with at most two compute devices per rack.
+Its `exhaustive.slot_options` contains two node choices, so the full space is
+`2^(4 racks * 2 slots) = 256` candidates. The runner validates that the space is
+finite, checks `exhaustive.max_candidates`, writes `candidate_*/score.json`, and
+exports `best_proposal.json`, `best_hardware_topology.json`, and
+`exhaustive_summary.json`.
+
+The same entrypoint is also available as a standalone script:
+
+```bash
+python ./scripts/exhaustive_search.py \
+  --catalog ./examples/component_catalog_tcro_latent_rack.json \
+  --space ./examples/search_space_4rack_exhaustive_tiny.json \
+  --workload ../mapper/examples/cg_iteration_workload.json
+```
+
 ## Key Design Notes
 
 - The sample simulator files are **JSONC** (comments included), so parser supports inline `// ...` comments.
