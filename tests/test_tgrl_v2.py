@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import tempfile
 import threading
 import time
 
@@ -158,7 +159,7 @@ def _observation():
     feedback = FakePipeline(remote_queue=2_000_000).run(
         topology_path=Path("topology.json"),
         workload_path=Path("workload.json"),
-        out_dir=Path("/private/tmp/tgrl_v2_fake"),
+        out_dir=Path(tempfile.gettempdir()) / "tgrl_v2_fake",
     )
     masked = build_masked_actions(
         chromosome,
@@ -302,6 +303,7 @@ def test_tgrl_v2_trainer_smoke_and_checkpoint_resume(tmp_path: Path) -> None:
     assert latest["update"] == 1
     assert "rng_state" in latest
     assert "seen_signatures" in latest
+    assert latest["seed_archive"]
     assert latest["rollout_seed_chromosome"] is not None
     update_rows = json.loads((out_dir / "curves" / "update_scores.json").read_text(encoding="utf-8"))["rows"]
     metric_rows = json.loads((out_dir / "curves" / "ppo_metrics.json").read_text(encoding="utf-8"))["rows"]
@@ -309,6 +311,89 @@ def test_tgrl_v2_trainer_smoke_and_checkpoint_resume(tmp_path: Path) -> None:
     assert [row["update"] for row in update_rows] == [0, 1]
     assert [row["update"] for row in metric_rows] == [0, 1]
     assert max(row["update"] for row in candidate_rows) == 1
+
+
+def test_tgrl_v2_diversifies_parallel_env_initial_seeds(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    trainer = TGRLPPOTrainer(
+        component_library=_library(),
+        search_space=_space(),
+        pipeline_client=FakePipeline(delay_s=0.0),
+        workload_path=workload,
+        out_dir=tmp_path / "diverse",
+        updates=1,
+        rollout_steps=1,
+        env_count=4,
+        config=TGRLPPOConfig(
+            ppo_epochs=1,
+            minibatch_size=1,
+            device="cpu",
+            seed_diversity_steps=1,
+            seed_diversity_attempts=8,
+        ),
+    )
+
+    envs = trainer._initialize_envs(0)
+
+    signatures = {env.initial_evaluation.chromosome.signature() for env in envs}
+    assert len(envs) == 4
+    assert len(signatures) > 1
+
+
+def test_tgrl_v2_masks_seen_action_candidates(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    library = _library()
+    space = _space()
+    trainer = TGRLPPOTrainer(
+        component_library=library,
+        search_space=space,
+        pipeline_client=FakePipeline(delay_s=0.0),
+        workload_path=workload,
+        out_dir=tmp_path / "mask",
+        updates=1,
+        rollout_steps=1,
+        env_count=1,
+        config=TGRLPPOConfig(
+            ppo_epochs=1,
+            minibatch_size=1,
+            device="cpu",
+            mask_seen_actions=True,
+            restart_on_stall=False,
+        ),
+    )
+    env = trainer._initialize_envs(0)[0]
+    repairer = CandidateRepairer(library, space)
+    repair = repairer.repair_and_validate(env.chromosome)
+    actions = build_masked_actions(
+        env.chromosome,
+        component_library=library,
+        search_space=space,
+        repairer=repairer,
+        exporter=HardwareTopologyExporter(library),
+        feedback=env.last_feedback,
+        current_repair=repair,
+        policy=None,
+        config=TGRLConfig(),
+    )
+    assert len(actions) > 1
+    expected_signature = actions[-1].chromosome.signature()
+    for action in actions[:-1]:
+        trainer._seen_signatures.add(action.chromosome.signature())
+
+    selections = trainer._select_actions(
+        [env],
+        update=0,
+        update_position=0,
+        step=0,
+        best_score=env.previous_score,
+    )
+
+    assert len(selections) == 1
+    _env, selected, transition = selections[0]
+    assert selected.chromosome.signature() == expected_signature
+    assert len(transition.observation.masked_actions) == 1
 
 
 def test_tgrl_v2_trainer_runs_workload_suite(tmp_path: Path) -> None:

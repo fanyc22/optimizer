@@ -64,6 +64,12 @@ class TGRLPPOConfig(BaseModel):
     duplicate_penalty: float = Field(default=0.05, ge=0.0)
     best_improvement_bonus: float = Field(default=0.1, ge=0.0)
     reward_clip: float = Field(default=5.0, gt=0.0)
+    seed_archive_size: int = Field(default=16, ge=1)
+    seed_diversity_steps: int = Field(default=2, ge=0)
+    seed_diversity_attempts: int = Field(default=12, ge=1)
+    mask_seen_actions: bool = True
+    restart_on_stall: bool = True
+    skip_cache_hit_transitions: bool = True
     freeze_topology: bool = False
     device: str = "auto"
     resume: Path | None = None
@@ -93,6 +99,12 @@ class EnvState:
     last_suite_feedback: MultiWorkloadFeedback | None
     trajectory: list[PPOTransition]
     initial_evaluation: TGRLEvaluation
+
+
+@dataclass
+class SeedArchiveItem:
+    score: float
+    chromosome: Chromosome
 
 
 @dataclass(frozen=True)
@@ -143,6 +155,7 @@ class TGRLPPOTrainer:
         self._cache: dict[str, TGRLEvaluation] = {}
         self._cache_lock = threading.Lock()
         self._seen_signatures: set[str] = set()
+        self._seed_archive: list[SeedArchiveItem] = []
         self._best_score = float("inf")
         self._start_update = 0
         self._rollout_seed_chromosome: Chromosome | None = None
@@ -207,6 +220,8 @@ class TGRLPPOTrainer:
                     best = env.initial_evaluation
                 if env.initial_evaluation.weighted_score < self._best_score:
                     self._best_score = env.initial_evaluation.weighted_score
+                self._seen_signatures.add(env.initial_evaluation.chromosome.signature())
+                self._remember_seed_candidate(env.initial_evaluation)
             if envs:
                 initial_best = min((env.initial_evaluation for env in envs), key=lambda item: item.weighted_score)
                 logger.info(
@@ -218,6 +233,7 @@ class TGRLPPOTrainer:
 
             update_trajectories: list[list[PPOTransition]] = [[] for _ in envs]
             update_evaluations: list[TGRLEvaluation] = []
+            cache_hit_transitions_skipped = 0
             for step in range(self._rollout_steps):
                 selections = self._select_actions(
                     envs,
@@ -245,18 +261,24 @@ class TGRLPPOTrainer:
                 for evaluation, transition, env in evaluations:
                     history.append(evaluation)
                     update_evaluations.append(evaluation)
-                    reward = self._reward(
-                        previous_score=env.previous_score,
-                        new_score=evaluation.weighted_score,
-                        feasible=evaluation.feasible,
-                        signature=evaluation.chromosome.signature(),
-                    )
-                    transition.reward = reward
-                    transition.candidate_signature = evaluation.chromosome.signature()
+                    signature = evaluation.chromosome.signature()
                     transition.done = False
-                    update_trajectories[env.env_id].append(transition)
-                    all_transitions.append(transition)
-                    self._append_trajectory(update, transition, evaluation)
+                    transition.candidate_signature = signature
+                    self._remember_seed_candidate(evaluation)
+                    if evaluation.cache_hit and self._config.skip_cache_hit_transitions:
+                        cache_hit_transitions_skipped += 1
+                        self._seen_signatures.add(signature)
+                    else:
+                        reward = self._reward(
+                            previous_score=env.previous_score,
+                            new_score=evaluation.weighted_score,
+                            feasible=evaluation.feasible,
+                            signature=signature,
+                        )
+                        transition.reward = reward
+                        update_trajectories[env.env_id].append(transition)
+                        all_transitions.append(transition)
+                        self._append_trajectory(update, transition, evaluation)
                     env.chromosome = evaluation.chromosome.model_copy(deep=True)
                     env.previous_score = evaluation.weighted_score
                     env.last_feedback = evaluation.feedback
@@ -291,6 +313,7 @@ class TGRLPPOTrainer:
                 device=self._device,
                 rng=self._rng,
             )
+            metrics["cache_hit_transitions_skipped"] = float(cache_hit_transitions_skipped)
             update_candidates = [env.initial_evaluation for env in envs] + update_evaluations
             if update_candidates:
                 update_best = min(update_candidates, key=lambda item: item.weighted_score)
@@ -322,9 +345,11 @@ class TGRLPPOTrainer:
                 initial_best_score=curve_initial_best,
             )
             logger.info(
-                "TG-RL v2 update %d PPO update complete: transitions=%d policy_loss=%.6f value_loss=%.6f entropy=%.6f kl_prior=%.6f",
+                "TG-RL v2 update %d PPO update complete: transitions=%d cache_hit_skipped=%d "
+                "policy_loss=%.6f value_loss=%.6f entropy=%.6f kl_prior=%.6f",
                 update,
                 len(flattened),
+                cache_hit_transitions_skipped,
                 metrics.get("policy_loss", 0.0),
                 metrics.get("value_loss", 0.0),
                 metrics.get("entropy", 0.0),
@@ -393,9 +418,7 @@ class TGRLPPOTrainer:
         dump_json(baseline_dir / "suite_feedback.json", feedback.to_dict())
 
     def _initialize_envs(self, update: int) -> list[EnvState]:
-        seed = self._rollout_seed_chromosome or self._initial_chromosome()
-        chromosomes = [seed.model_copy(deep=True) for _ in range(self._env_count)]
-        evaluations = self._evaluate_initials(chromosomes, update)
+        evaluations = self._evaluate_initials(self._initial_env_chromosomes(), update)
         envs: list[EnvState] = []
         for env_id, evaluation in enumerate(evaluations):
             env = EnvState(
@@ -409,6 +432,100 @@ class TGRLPPOTrainer:
             )
             envs.append(env)
         return envs
+
+    def _initial_env_chromosomes(self) -> list[Chromosome]:
+        seed = self._rollout_seed_chromosome or self._initial_chromosome()
+        chromosomes = [seed.model_copy(deep=True)]
+        reserved = {seed.signature()}
+        for env_id in range(1, self._env_count):
+            chromosome = self._diversified_seed_chromosome(env_id, reserved_signatures=reserved)
+            reserved.add(chromosome.signature())
+            chromosomes.append(chromosome)
+        return chromosomes
+
+    def _seed_pool(self) -> list[Chromosome]:
+        pool: list[Chromosome] = []
+        if self._rollout_seed_chromosome is not None:
+            pool.append(self._rollout_seed_chromosome.model_copy(deep=True))
+        pool.extend(item.chromosome.model_copy(deep=True) for item in self._seed_archive)
+        pool.append(self._initial_chromosome())
+        unique: list[Chromosome] = []
+        seen: set[str] = set()
+        for chromosome in pool:
+            signature = chromosome.signature()
+            if signature in seen:
+                continue
+            seen.add(signature)
+            unique.append(chromosome)
+        return unique
+
+    def _diversified_seed_chromosome(
+        self,
+        env_id: int,
+        *,
+        reserved_signatures: set[str],
+    ) -> Chromosome:
+        pool = self._seed_pool()
+        fallback = pool[env_id % len(pool)].model_copy(deep=True)
+        best_fallback = fallback
+        attempts = max(1, self._config.seed_diversity_attempts)
+        for attempt in range(attempts):
+            base = pool[(env_id + attempt) % len(pool)].model_copy(deep=True)
+            extra_steps = (
+                self._rng.randrange(self._config.seed_diversity_steps + 1)
+                if self._config.seed_diversity_steps
+                else 0
+            )
+            steps = self._config.seed_diversity_steps + extra_steps
+            candidate = self._random_walk_chromosome(
+                base,
+                steps=steps,
+                reserved_signatures=reserved_signatures,
+            )
+            signature = candidate.signature()
+            if signature not in reserved_signatures:
+                best_fallback = candidate
+            if not self._is_known_candidate(candidate, reserved_signatures=reserved_signatures):
+                return candidate
+        return best_fallback
+
+    def _random_walk_chromosome(
+        self,
+        chromosome: Chromosome,
+        *,
+        steps: int,
+        reserved_signatures: set[str],
+    ) -> Chromosome:
+        current = chromosome.model_copy(deep=True)
+        local_reserved = set(reserved_signatures)
+        for _ in range(max(0, steps)):
+            repair = self._repairer.repair_and_validate(current)
+            masked_actions = build_masked_actions(
+                repair.chromosome,
+                component_library=self._library,
+                search_space=self._space,
+                repairer=self._repairer,
+                exporter=self._exporter,
+                feedback=None,
+                current_repair=repair,
+                policy=None,
+                config=TGRLConfig(
+                    temperature=self._config.temperature,
+                    heuristic_weight=self._config.heuristic_weight,
+                    freeze_topology=self._config.freeze_topology,
+                ),
+            )
+            if not masked_actions:
+                break
+            novel_actions = [
+                action
+                for action in masked_actions
+                if not self._is_known_candidate(action.chromosome, reserved_signatures=local_reserved)
+            ]
+            selected = self._rng.choice(novel_actions or masked_actions)
+            current = selected.chromosome.model_copy(deep=True)
+            local_reserved.add(current.signature())
+        return current
 
     def _initial_chromosome(self) -> Chromosome:
         if not self._space.templates:
@@ -455,67 +572,133 @@ class TGRLPPOTrainer:
         best_score: float,
     ) -> list[tuple[EnvState, MaskedAction, PPOTransition]]:
         selections: list[tuple[EnvState, MaskedAction, PPOTransition]] = []
+        reserved_signatures: set[str] = set()
         self._model.eval()
         for env in envs:
-            repair = self._repairer.repair_and_validate(env.chromosome)
-            masked_actions = build_masked_actions(
-                env.chromosome,
-                component_library=self._library,
-                search_space=self._space,
-                repairer=self._repairer,
-                exporter=self._exporter,
-                feedback=env.last_suite_feedback or env.last_feedback,
-                current_repair=repair,
-                policy=None,
-                config=TGRLConfig(
-                    temperature=self._config.temperature,
-                    heuristic_weight=self._config.heuristic_weight,
-                    freeze_topology=self._config.freeze_topology,
-                ),
-            )
-            if not masked_actions:
-                continue
-            observation = self._observation_builder.build(
-                chromosome=repair.chromosome,
-                repair=repair,
-                feedback=env.last_feedback,
-                masked_actions=masked_actions,
-                suite_feedback=env.last_suite_feedback,
-                current_score=env.previous_score,
-                best_score=best_score if best_score < float("inf") else env.previous_score,
-                update=update_position,
+            selection = self._select_action_from_env(
+                env,
+                update_position=update_position,
                 step=step,
-                total_updates=self._updates,
-                rollout_steps=self._rollout_steps,
+                best_score=best_score,
+                reserved_signatures=reserved_signatures,
             )
-            with torch.no_grad():
-                dist, _logits, value, _tensor_observation = policy_distribution(
-                    self._model,
-                    observation,
-                    device=self._device,
-                    heuristic_weight=self._config.heuristic_weight,
-                )
-                action_tensor = dist.sample()
-                action_index = int(action_tensor.item())
-                old_logprob = float(dist.log_prob(action_tensor).item())
-                probs = dist.probs.detach().cpu().tolist()
-            for idx, item in enumerate(observation.masked_actions):
-                item.policy_prob = float(probs[idx])
-                item.logprob = float(torch.log(torch.tensor(max(1e-12, probs[idx]))).item())
-            selected = observation.masked_actions[action_index]
-            transition = PPOTransition(
-                observation=observation,
-                action_index=action_index,
-                old_logprob=old_logprob,
-                value=float(value.item()),
-                reward=0.0,
-                done=False,
-                candidate_signature="",
-                episode_env=env.env_id,
-                rollout_step=step,
-            )
-            selections.append((env, selected, transition))
+            if selection is None and self._config.restart_on_stall:
+                restarted = self._restart_env_for_selection(env, reserved_signatures=reserved_signatures)
+                if restarted:
+                    logger.info(
+                        "TG-RL v2 update %d step %d env %d restarted after seen-action stall",
+                        update,
+                        step,
+                        env.env_id,
+                    )
+                    selection = self._select_action_from_env(
+                        env,
+                        update_position=update_position,
+                        step=step,
+                        best_score=best_score,
+                        reserved_signatures=reserved_signatures,
+                    )
+            if selection is None:
+                continue
+            reserved_signatures.add(selection[1].chromosome.signature())
+            selections.append(selection)
         return selections
+
+    def _select_action_from_env(
+        self,
+        env: EnvState,
+        *,
+        update_position: int,
+        step: int,
+        best_score: float,
+        reserved_signatures: set[str],
+    ) -> tuple[EnvState, MaskedAction, PPOTransition] | None:
+        repair = self._repairer.repair_and_validate(env.chromosome)
+        masked_actions = build_masked_actions(
+            env.chromosome,
+            component_library=self._library,
+            search_space=self._space,
+            repairer=self._repairer,
+            exporter=self._exporter,
+            feedback=env.last_suite_feedback or env.last_feedback,
+            current_repair=repair,
+            policy=None,
+            config=TGRLConfig(
+                temperature=self._config.temperature,
+                heuristic_weight=self._config.heuristic_weight,
+                freeze_topology=self._config.freeze_topology,
+            ),
+        )
+        if not masked_actions:
+            return None
+        if self._config.mask_seen_actions:
+            novel_actions = [
+                action
+                for action in masked_actions
+                if not self._is_known_candidate(action.chromosome, reserved_signatures=reserved_signatures)
+            ]
+            if novel_actions:
+                masked_actions = novel_actions
+            elif self._config.restart_on_stall:
+                return None
+        observation = self._observation_builder.build(
+            chromosome=repair.chromosome,
+            repair=repair,
+            feedback=env.last_feedback,
+            masked_actions=masked_actions,
+            suite_feedback=env.last_suite_feedback,
+            current_score=env.previous_score,
+            best_score=best_score if best_score < float("inf") else env.previous_score,
+            update=update_position,
+            step=step,
+            total_updates=self._updates,
+            rollout_steps=self._rollout_steps,
+        )
+        with torch.no_grad():
+            dist, _logits, value, _tensor_observation = policy_distribution(
+                self._model,
+                observation,
+                device=self._device,
+                heuristic_weight=self._config.heuristic_weight,
+            )
+            action_tensor = dist.sample()
+            action_index = int(action_tensor.item())
+            old_logprob = float(dist.log_prob(action_tensor).item())
+            probs = dist.probs.detach().cpu().tolist()
+        for idx, item in enumerate(observation.masked_actions):
+            item.policy_prob = float(probs[idx])
+            item.logprob = float(torch.log(torch.tensor(max(1e-12, probs[idx]))).item())
+        selected = observation.masked_actions[action_index]
+        transition = PPOTransition(
+            observation=observation,
+            action_index=action_index,
+            old_logprob=old_logprob,
+            value=float(value.item()),
+            reward=0.0,
+            done=False,
+            candidate_signature="",
+            episode_env=env.env_id,
+            rollout_step=step,
+        )
+        return env, selected, transition
+
+    def _restart_env_for_selection(
+        self,
+        env: EnvState,
+        *,
+        reserved_signatures: set[str],
+    ) -> bool:
+        reserved = set(reserved_signatures)
+        reserved.add(env.chromosome.signature())
+        chromosome = self._diversified_seed_chromosome(env.env_id + 1, reserved_signatures=reserved)
+        if chromosome.signature() == env.chromosome.signature():
+            return False
+        env.chromosome = chromosome.model_copy(deep=True)
+        if self._best_score < float("inf"):
+            env.previous_score = self._best_score
+        env.last_feedback = None
+        env.last_suite_feedback = None
+        return True
 
     def _evaluate_selections(
         self,
@@ -923,6 +1106,10 @@ class TGRLPPOTrainer:
                 "rng_state": self._rng.getstate(),
                 "torch_rng_state": torch.random.get_rng_state(),
                 "seen_signatures": sorted(self._seen_signatures),
+                "seed_archive": [
+                    {"score": item.score, "chromosome": item.chromosome.to_dict()}
+                    for item in self._seed_archive
+                ],
                 "suite_baseline": self._suite_baseline.to_dict() if self._suite_baseline is not None else None,
                 "rollout_seed_chromosome": (
                     self._rollout_seed_chromosome.to_dict()
@@ -962,6 +1149,14 @@ class TGRLPPOTrainer:
             torch.random.set_rng_state(checkpoint["torch_rng_state"].detach().cpu())
         if "seen_signatures" in checkpoint:
             self._seen_signatures = set(str(item) for item in checkpoint["seen_signatures"])
+        if checkpoint.get("seed_archive"):
+            self._seed_archive = [
+                SeedArchiveItem(
+                    score=float(item["score"]),
+                    chromosome=Chromosome.model_validate(item["chromosome"]),
+                )
+                for item in checkpoint["seed_archive"]
+            ][: self._config.seed_archive_size]
         if checkpoint.get("suite_baseline"):
             baseline = WorkloadSuiteBaseline.from_dict(checkpoint["suite_baseline"])
             if (
@@ -971,6 +1166,28 @@ class TGRLPPOTrainer:
                 self._suite_baseline = baseline
         if checkpoint.get("rollout_seed_chromosome"):
             self._rollout_seed_chromosome = Chromosome.model_validate(checkpoint["rollout_seed_chromosome"])
+
+    def _is_known_candidate(self, chromosome: Chromosome, *, reserved_signatures: set[str]) -> bool:
+        signature = chromosome.signature()
+        if signature in reserved_signatures or signature in self._seen_signatures:
+            return True
+        return self._cached_evaluation(self._cache_signature(chromosome)) is not None
+
+    def _remember_seed_candidate(self, evaluation: TGRLEvaluation) -> None:
+        if not evaluation.feasible:
+            return
+        signature = evaluation.chromosome.signature()
+        archive_by_signature = {item.chromosome.signature(): item for item in self._seed_archive}
+        existing = archive_by_signature.get(signature)
+        if existing is not None and existing.score <= evaluation.weighted_score:
+            return
+        archive_by_signature[signature] = SeedArchiveItem(
+            score=evaluation.weighted_score,
+            chromosome=evaluation.chromosome.model_copy(deep=True),
+        )
+        self._seed_archive = sorted(archive_by_signature.values(), key=lambda item: item.score)[
+            : self._config.seed_archive_size
+        ]
 
     def _cache_signature(self, chromosome: Chromosome) -> str:
         signature = chromosome.signature()
