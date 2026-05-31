@@ -1,0 +1,176 @@
+{
+  "seed": 2802,
+  "templates": [
+    {
+      "name": "five_rack_tiny_exhaustive",
+      "racks": [
+        {
+          "rack_id": "tiny-rack0",
+          "role": "compute",
+          "origin": "seed",
+          "max_slots": 2,
+          "slots": [
+            {"slot_id": "slot0", "node_type": "GPU_BALANCED_80TF_80GB", "link_type": "GPU_FABRIC_200G", "link_qty": 1},
+            {"slot_id": "slot1", "node_type": "CPU_HIGH_BW_96C", "link_type": "CPU_PCIE_128G", "link_qty": 1}
+          ],
+          "switch_count": 1,
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "GPU_FABRIC_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_slots": 2,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 4,
+            "max_power_watts": 2500
+          }
+        },
+        {
+          "rack_id": "tiny-rack1",
+          "role": "compute",
+          "origin": "seed",
+          "max_slots": 2,
+          "slots": [
+            {"slot_id": "slot0", "node_type": "GPU_BALANCED_80TF_80GB", "link_type": "GPU_FABRIC_200G", "link_qty": 1},
+            {"slot_id": "slot1", "node_type": "CPU_HIGH_BW_96C", "link_type": "CPU_PCIE_128G", "link_qty": 1}
+          ],
+          "switch_count": 1,
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "GPU_FABRIC_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_slots": 2,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 4,
+            "max_power_watts": 2500
+          }
+        },
+        {
+          "rack_id": "tiny-rack2",
+          "role": "compute",
+          "origin": "seed",
+          "max_slots": 2,
+          "slots": [
+            {"slot_id": "slot0", "node_type": "GPU_BALANCED_80TF_80GB", "link_type": "GPU_FABRIC_200G", "link_qty": 1},
+            {"slot_id": "slot1", "node_type": "CPU_HIGH_BW_96C", "link_type": "CPU_PCIE_128G", "link_qty": 1}
+          ],
+          "switch_count": 1,
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "GPU_FABRIC_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_slots": 2,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 4,
+            "max_power_watts": 2500
+          }
+        },
+        {
+          "rack_id": "tiny-rack3",
+          "role": "compute",
+          "origin": "seed",
+          "max_slots": 2,
+          "slots": [
+            {"slot_id": "slot0", "node_type": "GPU_BALANCED_80TF_80GB", "link_type": "GPU_FABRIC_200G", "link_qty": 1},
+            {"slot_id": "slot1", "node_type": "CPU_HIGH_BW_96C", "link_type": "CPU_PCIE_128G", "link_qty": 1}
+          ],
+          "switch_count": 1,
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "GPU_FABRIC_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_slots": 2,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 4,
+            "max_power_watts": 2500
+          }
+        },
+        {
+          "rack_id": "tiny-rack4",
+          "role": "compute",
+          "origin": "seed",
+          "max_slots": 2,
+          "slots": [
+            {"slot_id": "slot0", "node_type": "GPU_BALANCED_80TF_80GB", "link_type": "GPU_FABRIC_200G", "link_qty": 1},
+            {"slot_id": "slot1", "node_type": "CPU_HIGH_BW_96C", "link_type": "CPU_PCIE_128G", "link_qty": 1}
+          ],
+          "switch_count": 1,
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "GPU_FABRIC_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_slots": 2,
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 4,
+            "max_power_watts": 2500
+          }
+        }
+      ],
+      "inter_rack": "ring",
+      "inter_rack_link_type": "OPTICAL_400G",
+      "inter_rack_link_qty": 1
+    }
+  ],
+  "rack_archetypes": [],
+  "exhaustive": {
+    "slot_options": [
+      {"node_type": "GPU_BALANCED_80TF_80GB", "link_type": "GPU_FABRIC_200G", "link_qty": 1},
+      {"node_type": "CPU_HIGH_BW_96C", "link_type": "CPU_PCIE_128G", "link_qty": 1}
+    ],
+    "intra_rack_topologies": ["switch"],
+    "intra_rack_link_types": ["GPU_FABRIC_200G"],
+    "intra_rack_link_qty": [1],
+    "inter_rack_topologies": ["ring"],
+    "inter_rack_link_types": ["OPTICAL_400G"],
+    "inter_rack_link_qty": [1],
+    "max_candidates": 1024
+  },
+  "mutation": {
+    "min_intra_rack_link_qty": 1,
+    "max_intra_rack_link_qty": 1,
+    "min_inter_rack_link_qty": 1,
+    "max_inter_rack_link_qty": 1,
+    "mutation_rate": 0.0,
+    "bottleneck_mutation_rate": 0.0,
+    "elite_fraction": 0.25,
+    "allow_remove_initial_racks": false
+  },
+  "limits": {
+    "max_total_cost": 560000,
+    "max_peak_power_watts": 15000,
+    "max_rack_power_watts": 2500,
+    "max_rack_units": 42,
+    "max_total_racks": 5,
+    "min_compute_racks": 5,
+    "max_compute_racks": 5,
+    "max_memory_racks": 0,
+    "max_hybrid_racks": 0
+  },
+  "objective_weights": {
+    "makespan": 1.0,
+    "cost": 0.10,
+    "power": 0.10,
+    "max_link_utilization": 0.30,
+    "max_queue_delay": 0.25,
+    "remote_memory_contention": 0.15
+  },
+  "evaluation": {
+    "mapper": "heft",
+    "parallel": "none",
+    "topology_format": "hardware",
+    "sim_extra": [],
+    "mapper_extra": [],
+    "scaling_report": false,
+    "timeout_seconds": 7200,
+    "cleanup_wrapper_intermediate": true
+  }
+}

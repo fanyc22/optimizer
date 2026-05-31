@@ -134,23 +134,27 @@ def _space() -> SearchSpace:
 def test_exhaustive_enumeration_counts_example_space() -> None:
     optimizer_root = Path(__file__).resolve().parents[1]
     catalog = load_component_library(load_jsonc(optimizer_root / "examples" / "component_catalog_tcro_latent_rack.json"))
-    space = SearchSpace.model_validate(
-        load_jsonc(optimizer_root / "examples" / "search_space_4rack_exhaustive_tiny.json")
-    )
+    examples = [
+        ("search_space_3rack_exhaustive_tiny.json", 3, 64),
+        ("search_space_4rack_exhaustive_tiny.json", 4, 256),
+        ("search_space_5rack_exhaustive_tiny.json", 5, 1024),
+    ]
+    for filename, rack_count, candidate_count in examples:
+        space = SearchSpace.model_validate(load_jsonc(optimizer_root / "examples" / filename))
 
-    validate_exhaustive_space(space, component_library=catalog)
+        validate_exhaustive_space(space, component_library=catalog)
 
-    assert len(space.templates[0].racks) == 4
-    assert all(rack.max_slots == 2 for rack in space.templates[0].racks)
-    assert count_exhaustive_candidates(space) == 256
-    chromosomes = iter_exhaustive_chromosomes(space)
-    assert len(chromosomes) == 256
-    assert all(
-        slot.link_type == ("GPU_FABRIC_200G" if slot.node_type == "GPU_BALANCED_80TF_80GB" else "CPU_PCIE_128G")
-        for chromosome in chromosomes
-        for rack in chromosome.racks
-        for slot in rack.slots
-    )
+        assert len(space.templates[0].racks) == rack_count
+        assert all(rack.max_slots == 2 for rack in space.templates[0].racks)
+        assert count_exhaustive_candidates(space) == candidate_count
+        chromosomes = iter_exhaustive_chromosomes(space)
+        assert len(chromosomes) == candidate_count
+        assert all(
+            slot.link_type == ("GPU_FABRIC_200G" if slot.node_type == "GPU_BALANCED_80TF_80GB" else "CPU_PCIE_128G")
+            for chromosome in chromosomes
+            for rack in chromosome.racks
+            for slot in rack.slots
+        )
 
 
 def test_exhaustive_runner_finds_best_candidate(tmp_path: Path) -> None:

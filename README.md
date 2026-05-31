@@ -335,6 +335,10 @@ finite, checks `exhaustive.max_candidates`, writes `candidate_*/score.json`, and
 exports `best_proposal.json`, `best_hardware_topology.json`, and
 `exhaustive_summary.json`.
 
+The same fixed-two-device pattern is also available as
+`search_space_3rack_exhaustive_tiny.json` with 64 candidates and
+`search_space_5rack_exhaustive_tiny.json` with 1024 candidates.
+
 The same entrypoint is also available as a standalone script:
 
 ```bash
