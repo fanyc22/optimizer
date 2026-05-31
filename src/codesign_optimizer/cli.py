@@ -75,7 +75,12 @@ def run_optimizer(
 def search_optimizer(
     catalog: Path = typer.Option(..., exists=True, readable=True, help="Component catalog JSON/JSONC."),
     space: Path = typer.Option(..., exists=True, readable=True, help="Heuristic search-space JSON/JSONC."),
-    workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
+    workload: Path = typer.Option(
+        ...,
+        exists=True,
+        readable=True,
+        help="Mapper workload JSON, or LLM config JSON/directory when evaluation.workload_kind=llm.",
+    ),
     generations: int = typer.Option(4, min=1, max=1000, help="Number of generations."),
     population: int = typer.Option(8, min=1, max=10000, help="Population size."),
     concurrency: int = typer.Option(
@@ -121,7 +126,12 @@ def search_optimizer(
 def exhaustive_optimizer(
     catalog: Path = typer.Option(..., exists=True, readable=True, help="Component catalog JSON/JSONC."),
     space: Path = typer.Option(..., exists=True, readable=True, help="Finite exhaustive search-space JSON/JSONC."),
-    workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
+    workload: Path = typer.Option(
+        ...,
+        exists=True,
+        readable=True,
+        help="Mapper workload JSON, or LLM config JSON/directory when evaluation.workload_kind=llm.",
+    ),
     concurrency: int = typer.Option(1, min=1, max=1024, help="Concurrent mapper/simulator evaluations."),
     max_candidates: int | None = typer.Option(None, min=1, help="Override exhaustive.max_candidates guard."),
     out: Path = typer.Option(Path("artifacts/exhaustive_run"), help="Search output directory."),
@@ -159,7 +169,12 @@ def exhaustive_optimizer(
 def tcro_optimizer(
     catalog: Path = typer.Option(..., exists=True, readable=True, help="Component catalog JSON/JSONC."),
     space: Path = typer.Option(..., exists=True, readable=True, help="TCRO search-space JSON/JSONC."),
-    workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
+    workload: Path = typer.Option(
+        ...,
+        exists=True,
+        readable=True,
+        help="Mapper workload JSON, or LLM config JSON/directory when evaluation.workload_kind=llm.",
+    ),
     steps: int = typer.Option(8, min=1, max=10000, help="Number of TCRO continuous-update steps."),
     samples_per_step: int = typer.Option(4, min=1, max=10000, help="Discrete samples evaluated per TCRO step."),
     concurrency: int = typer.Option(1, min=1, max=1024, help="Maximum concurrent mapper/simulator runs per step."),
@@ -217,7 +232,12 @@ def tcro_optimizer(
 def tgrl_optimizer(
     catalog: Path = typer.Option(..., exists=True, readable=True, help="Component catalog JSON/JSONC."),
     space: Path = typer.Option(..., exists=True, readable=True, help="TG-RL search-space JSON/JSONC."),
-    workload: Path | None = typer.Option(None, exists=True, readable=True, help="Mapper workload JSON."),
+    workload: Path | None = typer.Option(
+        None,
+        exists=True,
+        readable=True,
+        help="Mapper workload JSON, or LLM config JSON/directory when evaluation.workload_kind=llm.",
+    ),
     workload_suite: Path | None = typer.Option(None, exists=True, readable=True, help="Workload suite JSON for TG-RL v2 multi-workload optimization."),
     episodes: int = typer.Option(20, min=1, max=10000, help="Number of TG-RL episodes; for mode=v2 --resume, this many additional PPO updates are run."),
     steps_per_episode: int = typer.Option(8, min=1, max=10000, help="Graph edit steps per episode."),

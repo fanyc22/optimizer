@@ -89,9 +89,19 @@ class MutationSettings(BaseModel):
 class EvaluationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    workload_kind: Literal["mapper", "llm"] = "mapper"
     mapper: str = "heft"
     parallel: str = "auto"
     topology_format: str = "hardware"
+    llm_prefill_batch_size: int = Field(default=1, ge=1)
+    llm_prompt_len: int = Field(default=2048, ge=0)
+    llm_decode_batch_size: int = Field(default=1, ge=1)
+    llm_decode_steps: int = Field(default=0, ge=0)
+    llm_avg_context_len: int = Field(default=2048, ge=0)
+    llm_tp: int = Field(default=1, ge=1)
+    llm_pp: int = Field(default=1, ge=1)
+    llm_cp: int = Field(default=1, ge=1)
+    llm_dp: int = Field(default=1, ge=1)
     sim_extra: list[str] = Field(default_factory=list)
     mapper_extra: list[str] = Field(default_factory=list)
     scaling_report: bool = False

@@ -111,7 +111,7 @@ flowchart TD
 - `limits`：全局成本、功耗、rack 数量、rack 内功耗、rack units 等约束。
 - `objective_weights`：makespan、cost、power、link utilization、queue delay、remote memory contention 的加权目标。
 - `mutation`：进化搜索和图编辑中的链路数量范围、变异率、elite 比例、是否允许删除初始 rack 等。
-- `evaluation`：mapper、parallel、topology format、wrapper 参数、timeout、cleanup 等运行配置。
+- `evaluation`：mapper、parallel、topology format、wrapper 参数、timeout、cleanup 等运行配置；`workload_kind="llm"` 时，CLI 的 `--workload` 路径会被解释为 LLM `config.json` 或模型目录，并附带 `llm_*` 请求与 TP/PP 参数传给 wrapper。
 
 `load_component_library` 和 JSONC loader 支持示例配置中的注释。
 
@@ -188,7 +188,22 @@ python3 tools/run_mapper_sim_pipeline.py
   --topology-format hardware_topology.v2
 ```
 
-额外 mapper/simulator 参数由 `SearchSpace.evaluation.mapper_extra` 和 `SearchSpace.evaluation.sim_extra` 透传。
+当 `SearchSpace.evaluation.workload_kind == "llm"` 时，`PipelineClient` 把同一个 path 参数改写为：
+
+```text
+python3 tools/run_mapper_sim_pipeline.py
+  --topology <candidate>/hardware_topology.json
+  --llm-config <config.json-or-model-dir>
+  --llm-prompt-len <N>
+  --llm-decode-steps <N>
+  --llm-tp <N>
+  --llm-pp <N>
+  --out <candidate>/wrapper
+  --mapper <mapper>
+  --topology-format hardware
+```
+
+这样 `search`、`exhaustive`、`tcro`、`tgrl` 和 TG-RL v2 workload suite 都复用同一条 mapper-simulator 评估链路。额外 mapper/simulator 参数由 `SearchSpace.evaluation.mapper_extra` 和 `SearchSpace.evaluation.sim_extra` 透传。
 
 ## 6. Repair 与约束检查
 
@@ -858,4 +873,3 @@ candidate_or_step_dir/
 | `optimizer/orchestrator.py` | 旧版两阶段 co-design loop。 |
 | `optimizer/inner_loop.py` | 旧版软件映射启发式。 |
 | `optimizer/outer_loop.py` | 旧版硬件增量更新启发式。 |
-

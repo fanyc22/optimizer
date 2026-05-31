@@ -126,6 +126,40 @@ The search does not modify mapper, ET, or simulator semantics. The wrapper
 still projects only rank compute nodes to mapper; switch/router/memory-only
 nodes remain simulator-only explicit graph nodes.
 
+To optimize for LLM inference, keep using `--workload` as the path argument but
+point it at a supported LLM `config.json` or model directory, and set
+`evaluation.workload_kind` to `"llm"` in the search-space JSON:
+
+```json
+{
+  "evaluation": {
+    "workload_kind": "llm",
+    "mapper": "heft",
+    "parallel": "auto",
+    "llm_prompt_len": 128,
+    "llm_decode_steps": 16,
+    "llm_tp": 2,
+    "llm_pp": 1
+  }
+}
+```
+
+Then run the optimizer with the LLM config path:
+
+```bash
+codesign-opt search \
+  --catalog ./examples/component_catalog.json \
+  --space ./examples/search_space.json \
+  --workload ../mapper/examples/llm_qwen_tiny_config.json \
+  --generations 2 \
+  --population 4 \
+  --out ./artifacts/search_llm
+```
+
+The same `evaluation.workload_kind="llm"` setting is honored by `search`,
+`exhaustive`, `tcro`, and `tgrl`. In TG-RL v2 workload-suite mode, each suite
+item path is interpreted as an LLM config when this setting is enabled.
+
 ## TCRO Continuous-Relaxed Search
 
 TCRO keeps a continuous supernet inside the optimizer, samples discrete

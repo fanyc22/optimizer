@@ -38,8 +38,6 @@ class MapperSimulatorPipelineClient:
             str(self.repo_root / "tools" / "run_mapper_sim_pipeline.py"),
             "--topology",
             str(topology_path),
-            "--workload",
-            str(workload_path),
             "--out",
             str(out_dir),
             "--mapper",
@@ -49,6 +47,33 @@ class MapperSimulatorPipelineClient:
             "--topology-format",
             self.evaluation.topology_format,
         ]
+        if self.evaluation.workload_kind == "llm":
+            cmd.extend(
+                [
+                    "--llm-config",
+                    str(workload_path),
+                    "--llm-prefill-batch",
+                    str(self.evaluation.llm_prefill_batch_size),
+                    "--llm-prompt-len",
+                    str(self.evaluation.llm_prompt_len),
+                    "--llm-decode-batch",
+                    str(self.evaluation.llm_decode_batch_size),
+                    "--llm-decode-steps",
+                    str(self.evaluation.llm_decode_steps),
+                    "--llm-avg-context-len",
+                    str(self.evaluation.llm_avg_context_len),
+                    "--llm-tp",
+                    str(self.evaluation.llm_tp),
+                    "--llm-pp",
+                    str(self.evaluation.llm_pp),
+                    "--llm-cp",
+                    str(self.evaluation.llm_cp),
+                    "--llm-dp",
+                    str(self.evaluation.llm_dp),
+                ]
+            )
+        else:
+            cmd.extend(["--workload", str(workload_path)])
         for item in self.evaluation.mapper_extra:
             cmd.extend(["--mapper-extra", item])
         sim_extra = list(self.evaluation.sim_extra)
