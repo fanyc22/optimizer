@@ -339,6 +339,19 @@ The same fixed-two-device pattern is also available as
 `search_space_3rack_exhaustive_tiny.json` with 64 candidates and
 `search_space_5rack_exhaustive_tiny.json` with 1024 candidates.
 
+Exhaustive search can also enumerate topology choices. By default it uses the
+finite topology lists in `exhaustive.intra_rack_topologies` and
+`exhaustive.inter_rack_topologies`; pass `--freeze-topology` to keep those
+fields fixed to the template values and enumerate only device choices. The
+four-device examples are:
+
+- `search_space_1rack_4device_exhaustive_topology.json`: 1 rack, 4 fixed
+  devices, initial 2 GPU + 2 CPU; 64 candidates with topology enumeration, 16
+  with `--freeze-topology`.
+- `search_space_2rack_4device_exhaustive_topology.json`: 2 racks, 4 fixed
+  devices per rack, initial 2 GPU + 2 CPU per rack; 12288 candidates with
+  topology enumeration, 256 with `--freeze-topology`.
+
 The same entrypoint is also available as a standalone script:
 
 ```bash

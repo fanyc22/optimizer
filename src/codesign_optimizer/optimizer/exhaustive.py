@@ -73,6 +73,7 @@ class ExhaustiveSearchRunner:
         out_dir: Path,
         concurrency: int = 1,
         max_candidates: int | None = None,
+        freeze_topology: bool = False,
     ) -> None:
         self._library = component_library
         self._space = search_space
@@ -81,6 +82,7 @@ class ExhaustiveSearchRunner:
         self._out_dir = out_dir
         self._concurrency = max(1, concurrency)
         self._max_candidates = max_candidates
+        self._freeze_topology = freeze_topology
         self._exporter = HardwareTopologyExporter(component_library)
         self._repairer = CandidateRepairer(component_library, search_space)
         self._cache: dict[str, ExhaustiveEvaluation] = {}
@@ -89,13 +91,13 @@ class ExhaustiveSearchRunner:
 
     def run(self) -> ExhaustiveSearchResult:
         self._out_dir.mkdir(parents=True, exist_ok=True)
-        total_candidates = count_exhaustive_candidates(self._space)
+        total_candidates = count_exhaustive_candidates(self._space, freeze_topology=self._freeze_topology)
         cap = self._max_candidates or self._space.exhaustive.max_candidates
         if cap is not None and total_candidates > cap:
             raise ValueError(
                 f"exhaustive space has {total_candidates} candidates, exceeding max_candidates={cap}"
             )
-        chromosomes = list(iter_exhaustive_chromosomes(self._space))
+        chromosomes = list(iter_exhaustive_chromosomes(self._space, freeze_topology=self._freeze_topology))
         unique_candidates = len(chromosomes)
         if not chromosomes:
             raise RuntimeError("exhaustive enumeration produced no candidates")
@@ -111,6 +113,7 @@ class ExhaustiveSearchRunner:
                     for option in self._space.exhaustive.slot_options
                 ],
                 "max_candidates": cap,
+                "freeze_topology": self._freeze_topology,
             },
         )
         logger.info(
@@ -288,6 +291,7 @@ class ExhaustiveSearchRunner:
             "feasible_evaluations": sum(1 for item in history if item.feasible),
             "best_score": best.weighted_score,
             "best_feasible": best.feasible,
+            "freeze_topology": self._freeze_topology,
             "best": best.to_summary(),
         }
         dump_json(self._out_dir / "exhaustive_summary.json", summary)
@@ -331,7 +335,7 @@ def validate_exhaustive_space(
             raise ValueError(f"unknown exhaustive slot link_type: {option.link_type}")
 
 
-def count_exhaustive_candidates(space: SearchSpace) -> int:
+def count_exhaustive_candidates(space: SearchSpace, *, freeze_topology: bool = False) -> int:
     total = 0
     for template in space.templates:
         count = 1
@@ -341,28 +345,28 @@ def count_exhaustive_candidates(space: SearchSpace) -> int:
                 slot_count *= len(_slot_options_for_slot(slot, space))
             count *= (
                 slot_count
-                * len(_choices(space.exhaustive.intra_rack_topologies, rack.intra_rack_topology))
-                * len(_choices(space.exhaustive.intra_rack_link_types, rack.intra_rack_link_type))
-                * len(_choices(space.exhaustive.intra_rack_link_qty, rack.intra_rack_link_qty))
+                * len(_choices(space.exhaustive.intra_rack_topologies, rack.intra_rack_topology, freeze_topology))
+                * len(_choices(space.exhaustive.intra_rack_link_types, rack.intra_rack_link_type, freeze_topology))
+                * len(_choices(space.exhaustive.intra_rack_link_qty, rack.intra_rack_link_qty, freeze_topology))
             )
         count *= (
-            len(_choices(space.exhaustive.inter_rack_topologies, template.inter_rack))
-            * len(_choices(space.exhaustive.inter_rack_link_types, template.inter_rack_link_type))
-            * len(_choices(space.exhaustive.inter_rack_link_qty, template.inter_rack_link_qty))
+            len(_choices(space.exhaustive.inter_rack_topologies, template.inter_rack, freeze_topology))
+            * len(_choices(space.exhaustive.inter_rack_link_types, template.inter_rack_link_type, freeze_topology))
+            * len(_choices(space.exhaustive.inter_rack_link_qty, template.inter_rack_link_qty, freeze_topology))
         )
         total += count
     return total
 
 
-def iter_exhaustive_chromosomes(space: SearchSpace) -> list[Chromosome]:
+def iter_exhaustive_chromosomes(space: SearchSpace, *, freeze_topology: bool = False) -> list[Chromosome]:
     seen: set[str] = set()
     result: list[Chromosome] = []
     for template in space.templates:
         base = chromosome_from_template(template)
-        rack_variants = [_rack_variants(rack, space) for rack in base.racks]
-        inter_topologies = _choices(space.exhaustive.inter_rack_topologies, base.inter_rack)
-        inter_link_types = _choices(space.exhaustive.inter_rack_link_types, base.inter_rack_link_type)
-        inter_link_qty = _choices(space.exhaustive.inter_rack_link_qty, base.inter_rack_link_qty)
+        rack_variants = [_rack_variants(rack, space, freeze_topology=freeze_topology) for rack in base.racks]
+        inter_topologies = _choices(space.exhaustive.inter_rack_topologies, base.inter_rack, freeze_topology)
+        inter_link_types = _choices(space.exhaustive.inter_rack_link_types, base.inter_rack_link_type, freeze_topology)
+        inter_link_qty = _choices(space.exhaustive.inter_rack_link_qty, base.inter_rack_link_qty, freeze_topology)
         for rack_combo, inter_topology, inter_link_type, inter_qty in itertools.product(
             itertools.product(*rack_variants),
             inter_topologies,
@@ -382,11 +386,11 @@ def iter_exhaustive_chromosomes(space: SearchSpace) -> list[Chromosome]:
     return result
 
 
-def _rack_variants(rack: RackGene, space: SearchSpace) -> list[RackGene]:
+def _rack_variants(rack: RackGene, space: SearchSpace, *, freeze_topology: bool = False) -> list[RackGene]:
     slot_option_sets = [_slot_options_for_slot(slot, space) for slot in rack.slots]
-    intra_topologies = _choices(space.exhaustive.intra_rack_topologies, rack.intra_rack_topology)
-    intra_link_types = _choices(space.exhaustive.intra_rack_link_types, rack.intra_rack_link_type)
-    intra_link_qty = _choices(space.exhaustive.intra_rack_link_qty, rack.intra_rack_link_qty)
+    intra_topologies = _choices(space.exhaustive.intra_rack_topologies, rack.intra_rack_topology, freeze_topology)
+    intra_link_types = _choices(space.exhaustive.intra_rack_link_types, rack.intra_rack_link_type, freeze_topology)
+    intra_link_qty = _choices(space.exhaustive.intra_rack_link_qty, rack.intra_rack_link_qty, freeze_topology)
     variants: list[RackGene] = []
     for slot_options, topology, link_type, link_qty in itertools.product(
         itertools.product(*slot_option_sets),
@@ -420,7 +424,9 @@ def _slot_options_for_slot(slot: Any, space: SearchSpace) -> list[ExhaustiveSlot
     ]
 
 
-def _choices(values: list[Any] | None, fallback: Any) -> list[Any]:
+def _choices(values: list[Any] | None, fallback: Any, freeze_topology: bool = False) -> list[Any]:
+    if freeze_topology:
+        return [fallback]
     if values is None:
         return [fallback]
     return list(values)

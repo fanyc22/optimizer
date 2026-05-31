@@ -30,6 +30,10 @@ def main(
     workload: Path = typer.Option(..., exists=True, readable=True, help="Mapper workload JSON."),
     concurrency: int = typer.Option(1, min=1, max=1024, help="Concurrent mapper/simulator evaluations."),
     max_candidates: int | None = typer.Option(None, min=1, help="Override exhaustive.max_candidates guard."),
+    freeze_topology: bool = typer.Option(
+        False,
+        help="Keep rack fabric and inter-rack topology fields fixed to the template values.",
+    ),
     out: Path = typer.Option(Path("artifacts/exhaustive_run"), help="Search output directory."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
 ) -> None:
@@ -46,6 +50,7 @@ def main(
         out_dir=out,
         concurrency=concurrency,
         max_candidates=max_candidates,
+        freeze_topology=freeze_topology,
     )
     result = runner.run()
     console.print(
