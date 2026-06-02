@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="720" viewBox="0 0 1120 720" role="img" aria-labelledby="title desc">
+  <title id="title">4-rack search space: two GPU racks, one CPU rack, one memory pool rack</title>
+  <desc id="desc">Initial topology with four racks connected by an optical 400G ring with link quantity 2.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 28px Arial, sans-serif; fill: #111827; }
+      .subtitle { font: 15px Arial, sans-serif; fill: #475569; }
+      .rack { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; }
+      .rack-gpu { stroke: #2563eb; }
+      .rack-cpu { stroke: #16a34a; }
+      .rack-mem { stroke: #c2410c; }
+      .rack-title { font: 700 18px Arial, sans-serif; fill: #0f172a; }
+      .rack-meta { font: 13px Arial, sans-serif; fill: #334155; }
+      .slot { fill: #eef2ff; stroke: #bfdbfe; stroke-width: 1; }
+      .slot-cpu { fill: #ecfdf5; stroke: #bbf7d0; }
+      .slot-mem { fill: #fff7ed; stroke: #fed7aa; }
+      .slot-empty { fill: #f1f5f9; stroke: #cbd5e1; }
+      .slot-text { font: 700 12px Arial, sans-serif; fill: #1e293b; text-anchor: middle; dominant-baseline: central; }
+      .switch { fill: #e2e8f0; stroke: #94a3b8; stroke-width: 1.5; }
+      .link { fill: none; stroke: #334155; stroke-width: 3; marker-end: url(#arrow); }
+      .link-back { fill: none; stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 6 6; marker-end: url(#arrow); }
+      .legend { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
+      .legend-text { font: 13px Arial, sans-serif; fill: #334155; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1120" height="720"/>
+  <text class="title" x="56" y="56">Initial Search Space: 4 racks</text>
+  <text class="subtitle" x="56" y="82">2 pure GPU racks + 1 pure CPU rack + 1 memory-pool rack, inter-rack ring via OPTICAL_400G x2</text>
+
+  <path class="link" d="M386 182 C470 124, 650 124, 734 182"/>
+  <path class="link" d="M840 286 C896 344, 896 472, 840 530"/>
+  <path class="link" d="M734 634 C650 692, 470 692, 386 634"/>
+  <path class="link" d="M280 530 C224 472, 224 344, 280 286"/>
+  <path class="link-back" d="M734 206 C650 156, 470 156, 386 206"/>
+  <path class="link-back" d="M816 530 C864 472, 864 344, 816 286"/>
+  <path class="link-back" d="M386 610 C470 660, 650 660, 734 610"/>
+  <path class="link-back" d="M304 286 C256 344, 256 472, 304 530"/>
+
+  <g transform="translate(56 122)">
+    <rect class="rack rack-gpu" x="0" y="0" width="330" height="164" rx="8"/>
+    <text class="rack-title" x="20" y="32">gpu-rack0</text>
+    <text class="rack-meta" x="20" y="56">role=compute, memory_pool_count=0</text>
+    <rect class="switch" x="222" y="20" width="84" height="32" rx="6"/>
+    <text class="slot-text" x="264" y="36">SW128</text>
+    <g transform="translate(20 78)">
+      <rect class="slot" x="0" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="29" y="15">GPU</text>
+      <rect class="slot" x="68" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="97" y="15">GPU</text>
+      <rect class="slot" x="136" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="165" y="15">GPU</text>
+      <rect class="slot" x="204" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="233" y="15">GPU</text>
+      <rect class="slot-empty" x="0" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="29" y="55">empty</text>
+      <rect class="slot-empty" x="68" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="97" y="55">empty</text>
+      <rect class="slot-empty" x="136" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="165" y="55">empty</text>
+      <rect class="slot-empty" x="204" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="233" y="55">empty</text>
+    </g>
+    <text class="rack-meta" x="20" y="148">intra: GPU_FABRIC_200G x1</text>
+  </g>
+
+  <g transform="translate(734 122)">
+    <rect class="rack rack-gpu" x="0" y="0" width="330" height="164" rx="8"/>
+    <text class="rack-title" x="20" y="32">gpu-rack1</text>
+    <text class="rack-meta" x="20" y="56">role=compute, memory_pool_count=0</text>
+    <rect class="switch" x="222" y="20" width="84" height="32" rx="6"/>
+    <text class="slot-text" x="264" y="36">SW128</text>
+    <g transform="translate(20 78)">
+      <rect class="slot" x="0" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="29" y="15">GPU</text>
+      <rect class="slot" x="68" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="97" y="15">GPU</text>
+      <rect class="slot" x="136" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="165" y="15">GPU</text>
+      <rect class="slot" x="204" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="233" y="15">GPU</text>
+      <rect class="slot-empty" x="0" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="29" y="55">empty</text>
+      <rect class="slot-empty" x="68" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="97" y="55">empty</text>
+      <rect class="slot-empty" x="136" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="165" y="55">empty</text>
+      <rect class="slot-empty" x="204" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="233" y="55">empty</text>
+    </g>
+    <text class="rack-meta" x="20" y="148">intra: GPU_FABRIC_200G x1</text>
+  </g>
+
+  <g transform="translate(734 470)">
+    <rect class="rack rack-mem" x="0" y="0" width="330" height="164" rx="8"/>
+    <text class="rack-title" x="20" y="32">mem-rack0</text>
+    <text class="rack-meta" x="20" y="56">role=memory, memory_pool_count=1</text>
+    <rect class="switch" x="222" y="20" width="84" height="32" rx="6"/>
+    <text class="slot-text" x="264" y="36">SW128</text>
+    <g transform="translate(20 78)">
+      <rect class="slot-mem" x="0" y="0" width="126" height="42" rx="6"/>
+      <text class="slot-text" x="63" y="21">CXL 2TB pool</text>
+      <rect class="slot-empty" x="142" y="0" width="120" height="42" rx="6"/>
+      <text class="slot-text" x="202" y="21">no compute slots</text>
+    </g>
+    <text class="rack-meta" x="20" y="148">memory link: CXL_MEM_128G x1</text>
+  </g>
+
+  <g transform="translate(56 470)">
+    <rect class="rack rack-cpu" x="0" y="0" width="330" height="164" rx="8"/>
+    <text class="rack-title" x="20" y="32">cpu-rack0</text>
+    <text class="rack-meta" x="20" y="56">role=compute, memory_pool_count=0</text>
+    <rect class="switch" x="222" y="20" width="84" height="32" rx="6"/>
+    <text class="slot-text" x="264" y="36">SW128</text>
+    <g transform="translate(20 78)">
+      <rect class="slot-cpu" x="0" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="29" y="15">CPU</text>
+      <rect class="slot-cpu" x="68" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="97" y="15">CPU</text>
+      <rect class="slot-cpu" x="136" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="165" y="15">CPU</text>
+      <rect class="slot-cpu" x="204" y="0" width="58" height="30" rx="5"/><text class="slot-text" x="233" y="15">CPU</text>
+      <rect class="slot-empty" x="0" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="29" y="55">empty</text>
+      <rect class="slot-empty" x="68" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="97" y="55">empty</text>
+      <rect class="slot-empty" x="136" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="165" y="55">empty</text>
+      <rect class="slot-empty" x="204" y="40" width="58" height="30" rx="5"/><text class="slot-text" x="233" y="55">empty</text>
+    </g>
+    <text class="rack-meta" x="20" y="148">intra: CPU_PCIE_128G x1</text>
+  </g>
+
+  <g transform="translate(404 330)">
+    <rect class="legend" x="0" y="0" width="312" height="92" rx="8"/>
+    <text class="rack-title" x="18" y="30">Ring fabric</text>
+    <text class="legend-text" x="18" y="55">inter_rack = ring</text>
+    <text class="legend-text" x="18" y="76">OPTICAL_400G x2, bidirectional in exporter</text>
+  </g>
+</svg>
