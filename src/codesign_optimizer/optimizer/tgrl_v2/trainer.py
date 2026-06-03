@@ -18,6 +18,7 @@ from codesign_optimizer.io.jsonc import dump_json
 from codesign_optimizer.models.hardware import ComponentLibrary
 from codesign_optimizer.optimizer.chromosome import Chromosome, chromosome_from_template
 from codesign_optimizer.optimizer.exporter import ExportedHardware, HardwareTopologyExporter
+from codesign_optimizer.optimizer.exhaustive import count_exhaustive_candidates
 from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback
 from codesign_optimizer.optimizer.pipeline_client import PipelineClient
 from codesign_optimizer.optimizer.repair import CandidateRepairer, RepairReport
@@ -159,6 +160,10 @@ class TGRLPPOTrainer:
         self._best_score = float("inf")
         self._start_update = 0
         self._rollout_seed_chromosome: Chromosome | None = None
+        self._finite_candidate_count = _estimated_finite_candidate_count(
+            search_space,
+            freeze_topology=self._config.freeze_topology,
+        )
         if self._workload_path is None and self._workload_suite is None:
             raise ValueError("TGRLPPOTrainer requires either workload_path or workload_suite")
         if self._config.resume is not None:
@@ -315,6 +320,13 @@ class TGRLPPOTrainer:
             )
             metrics["cache_hit_transitions_skipped"] = float(cache_hit_transitions_skipped)
             update_candidates = [env.initial_evaluation for env in envs] + update_evaluations
+            metrics.update(
+                self._search_efficiency_metrics(
+                    update_candidates=update_candidates,
+                    rollout_evaluations=update_evaluations,
+                    transitions=flattened,
+                )
+            )
             if update_candidates:
                 update_best = min(update_candidates, key=lambda item: item.weighted_score)
                 self._rollout_seed_chromosome = update_best.chromosome.model_copy(deep=True)
@@ -1008,6 +1020,12 @@ class TGRLPPOTrainer:
                 "global_best_score": self._best_score,
                 "workload_suite": self._workload_suite.to_dict() if self._workload_suite is not None else None,
                 "baseline_suite": self._suite_baseline.to_dict() if self._suite_baseline is not None else None,
+                "finite_candidate_count": self._finite_candidate_count,
+                "finite_candidate_coverage": (
+                    len(self._seen_signatures) / self._finite_candidate_count
+                    if self._finite_candidate_count
+                    else None
+                ),
                 "best": best.to_summary(),
                 "per_workload_single_task_scores": per_workload_single_task_scores(
                     best,
@@ -1077,6 +1095,33 @@ class TGRLPPOTrainer:
                 ("value_loss", [(float(row["update"]), float(row.get("value_loss", 0.0))) for row in metrics_history]),
                 ("kl_prior", [(float(row["update"]), float(row.get("kl_prior", 0.0))) for row in metrics_history]),
                 ("entropy", [(float(row["update"]), float(row.get("entropy", 0.0))) for row in metrics_history]),
+            ],
+        )
+        _write_svg_lines(
+            curve_dir / "search_efficiency_curve.svg",
+            title="TG-RL v2 Search Efficiency By Update",
+            x_label="update",
+            y_label="metric value",
+            series=[
+                (
+                    "unique_candidate_rate",
+                    [(float(row["update"]), float(row.get("unique_candidate_rate", 0.0))) for row in metrics_history],
+                ),
+                (
+                    "cache_hit_rate",
+                    [(float(row["update"]), float(row.get("cache_hit_rate", 0.0))) for row in metrics_history],
+                ),
+                (
+                    "positive_reward_rate",
+                    [(float(row["update"]), float(row.get("positive_reward_rate", 0.0))) for row in metrics_history],
+                ),
+                (
+                    "finite_candidate_coverage",
+                    [
+                        (float(row["update"]), float(row.get("finite_candidate_coverage", 0.0)))
+                        for row in metrics_history
+                    ],
+                ),
             ],
         )
         logger.info("TG-RL v2 curves updated: %s", curve_dir)
@@ -1204,6 +1249,41 @@ class TGRLPPOTrainer:
     def _store_cached_evaluation(self, signature: str, evaluation: TGRLEvaluation) -> None:
         with self._cache_lock:
             self._cache.setdefault(signature, evaluation)
+
+    def _search_efficiency_metrics(
+        self,
+        *,
+        update_candidates: list[TGRLEvaluation],
+        rollout_evaluations: list[TGRLEvaluation],
+        transitions: list[PPOTransition],
+    ) -> dict[str, float]:
+        candidate_signatures = [item.chromosome.signature() for item in update_candidates]
+        rollout_signatures = [item.chromosome.signature() for item in rollout_evaluations]
+        unique_candidates = len(set(candidate_signatures))
+        unique_rollout_candidates = len(set(rollout_signatures))
+        cache_hits = sum(1 for item in rollout_evaluations if item.cache_hit)
+        metrics = {
+            "update_candidate_evaluations": float(len(update_candidates)),
+            "unique_update_candidates": float(unique_candidates),
+            "duplicate_update_candidates": float(max(0, len(candidate_signatures) - unique_candidates)),
+            "unique_candidate_rate": _ratio(unique_candidates, len(candidate_signatures)),
+            "unique_rollout_candidates": float(unique_rollout_candidates),
+            "rollout_duplicate_candidates": float(max(0, len(rollout_signatures) - unique_rollout_candidates)),
+            "cache_hit_rate": _ratio(cache_hits, len(rollout_evaluations)),
+            "mean_reward": _mean(item.reward for item in transitions),
+            "positive_reward_rate": _ratio(sum(1 for item in transitions if item.reward > 0.0), len(transitions)),
+            "seen_candidate_count": float(len(self._seen_signatures)),
+        }
+        if self._finite_candidate_count:
+            metrics["finite_candidate_count"] = float(self._finite_candidate_count)
+            metrics["finite_candidate_coverage"] = min(
+                1.0,
+                len(self._seen_signatures) / self._finite_candidate_count,
+            )
+            metrics["finite_candidates_remaining"] = float(
+                max(0, self._finite_candidate_count - len(self._seen_signatures))
+            )
+        return metrics
 
 
 def _select_device(name: str) -> torch.device:
@@ -1651,6 +1731,35 @@ def _line_segments(points: list[tuple[float, float]]) -> list[list[tuple[float, 
     if current:
         segments.append(current)
     return segments
+
+
+def _estimated_finite_candidate_count(space: SearchSpace, *, freeze_topology: bool) -> int | None:
+    exhaustive = space.exhaustive
+    has_finite_bounds = bool(exhaustive.slot_options or exhaustive.allow_empty_slots)
+    has_finite_bounds = has_finite_bounds or any(
+        values is not None
+        for values in [
+            exhaustive.intra_rack_topologies,
+            exhaustive.intra_rack_link_types,
+            exhaustive.intra_rack_link_qty,
+            exhaustive.inter_rack_topologies,
+            exhaustive.inter_rack_link_types,
+            exhaustive.inter_rack_link_qty,
+        ]
+    )
+    if not has_finite_bounds:
+        return None
+    try:
+        return count_exhaustive_candidates(space, freeze_topology=freeze_topology)
+    except Exception:
+        logger.warning("Unable to estimate finite exhaustive candidate count", exc_info=True)
+        return None
+
+
+def _ratio(numerator: int | float, denominator: int | float) -> float:
+    if denominator <= 0:
+        return 0.0
+    return float(numerator) / float(denominator)
 
 
 def _mean(values: Any) -> float:
