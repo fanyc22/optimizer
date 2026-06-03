@@ -346,7 +346,6 @@ def test_exhaustive_space_bounds_default_tgrl_actions() -> None:
             {"node_type": "GPU_SMALL", "link_type": "FAST", "link_qty": 1},
             {"node_type": "CPU", "link_type": "CXL", "link_qty": 1},
         ],
-        "allow_empty_slots": False,
         "intra_rack_topologies": ["switch"],
         "intra_rack_link_types": ["FAST"],
         "intra_rack_link_qty": [1],
@@ -366,7 +365,7 @@ def test_exhaustive_space_bounds_default_tgrl_actions() -> None:
         feedback=_feedback(compute=0.95),
         current_repair=repairer.repair_and_validate(chromosome),
         policy=None,
-        config=TGRLConfig(temperature=1.0),
+        config=TGRLConfig(temperature=1.0, allow_empty_slots=False),
     )
 
     assert masked

@@ -63,6 +63,7 @@ class TGRLConfig(BaseModel):
     greedy: bool = False
     duplicate_penalty: float = Field(default=0.05, ge=0)
     freeze_topology: bool = False
+    allow_empty_slots: bool = True
 
 
 TOPOLOGY_CHANGING_ACTION_TYPES: set[ActionType] = {
@@ -991,8 +992,7 @@ def _action_allowed_by_config(
             return False
     if (
         action.action_type == "remove_node_from_slot"
-        and search_space.exhaustive.slot_options
-        and not search_space.exhaustive.allow_empty_slots
+        and not config.allow_empty_slots
     ):
         return False
     return True

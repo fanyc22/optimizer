@@ -73,6 +73,7 @@ class TGRLPPOConfig(BaseModel):
     restart_on_stall: bool = True
     skip_cache_hit_transitions: bool = True
     freeze_topology: bool = False
+    allow_empty_slots: bool = True
     device: str = "auto"
     resume: Path | None = None
 
@@ -164,6 +165,7 @@ class TGRLPPOTrainer:
         self._finite_candidate_count = _estimated_finite_candidate_count(
             search_space,
             freeze_topology=self._config.freeze_topology,
+            allow_empty_slots=self._config.allow_empty_slots,
         )
         if self._workload_path is None and self._workload_suite is None:
             raise ValueError("TGRLPPOTrainer requires either workload_path or workload_suite")
@@ -528,6 +530,7 @@ class TGRLPPOTrainer:
                     temperature=self._config.temperature,
                     heuristic_weight=self._config.heuristic_weight,
                     freeze_topology=self._config.freeze_topology,
+                    allow_empty_slots=self._config.allow_empty_slots,
                 ),
             )
             if not masked_actions:
@@ -642,6 +645,7 @@ class TGRLPPOTrainer:
                 temperature=self._config.temperature,
                 heuristic_weight=self._config.heuristic_weight,
                 freeze_topology=self._config.freeze_topology,
+                allow_empty_slots=self._config.allow_empty_slots,
             ),
         )
         if not masked_actions:
@@ -1769,9 +1773,14 @@ def _line_segments(points: list[tuple[float, float]]) -> list[list[tuple[float, 
     return segments
 
 
-def _estimated_finite_candidate_count(space: SearchSpace, *, freeze_topology: bool) -> int | None:
+def _estimated_finite_candidate_count(
+    space: SearchSpace,
+    *,
+    freeze_topology: bool,
+    allow_empty_slots: bool,
+) -> int | None:
     exhaustive = space.exhaustive
-    has_finite_bounds = bool(exhaustive.slot_options or exhaustive.allow_empty_slots)
+    has_finite_bounds = bool(exhaustive.slot_options or allow_empty_slots)
     has_finite_bounds = has_finite_bounds or any(
         values is not None
         for values in [
@@ -1786,7 +1795,11 @@ def _estimated_finite_candidate_count(space: SearchSpace, *, freeze_topology: bo
     if not has_finite_bounds:
         return None
     try:
-        return count_exhaustive_candidates(space, freeze_topology=freeze_topology)
+        return count_exhaustive_candidates(
+            space,
+            freeze_topology=freeze_topology,
+            allow_empty_slots=allow_empty_slots,
+        )
     except Exception:
         logger.warning("Unable to estimate finite exhaustive candidate count", exc_info=True)
         return None

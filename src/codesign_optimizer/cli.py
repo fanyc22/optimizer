@@ -346,6 +346,11 @@ def tgrl_optimizer(
         False,
         help="Keep rack count, slot occupancy, and fabric topology fixed.",
     ),
+    allow_empty_slots: bool = typer.Option(
+        True,
+        "--allow-empty-slots/--no-allow-empty-slots",
+        help="Let TG-RL remove devices by treating each occupied slot as optionally empty.",
+    ),
     visualize_best: bool = typer.Option(
         True,
         "--visualize-best/--no-visualize-best",
@@ -412,6 +417,7 @@ def tgrl_optimizer(
                 heuristic_weight=heuristic_weight,
                 temperature=temperature,
                 freeze_topology=freeze_topology,
+                allow_empty_slots=allow_empty_slots,
                 device=device,
                 resume=resume,
             ),
@@ -476,6 +482,7 @@ def tgrl_optimizer(
             kl_weight=kl_weight,
             greedy=greedy,
             freeze_topology=freeze_topology,
+            allow_empty_slots=allow_empty_slots,
         ),
     )
     result = runner.run()
