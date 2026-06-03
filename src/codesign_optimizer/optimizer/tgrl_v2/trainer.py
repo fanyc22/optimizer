@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import html
 import json
 import logging
+import math
 import random
 import threading
 from pathlib import Path
@@ -279,6 +280,8 @@ class TGRLPPOTrainer:
                             new_score=evaluation.weighted_score,
                             feasible=evaluation.feasible,
                             signature=signature,
+                            previous_suite_feedback=env.last_suite_feedback,
+                            new_suite_feedback=evaluation.suite_feedback,
                         )
                         transition.reward = reward
                         update_trajectories[env.env_id].append(transition)
@@ -960,9 +963,22 @@ class TGRLPPOTrainer:
             penalty=penalty,
         )
 
-    def _reward(self, *, previous_score: float, new_score: float, feasible: bool, signature: str) -> float:
-        scale = max(1.0, abs(previous_score))
-        reward = (previous_score - new_score) / scale
+    def _reward(
+        self,
+        *,
+        previous_score: float,
+        new_score: float,
+        feasible: bool,
+        signature: str,
+        previous_suite_feedback: MultiWorkloadFeedback | None = None,
+        new_suite_feedback: MultiWorkloadFeedback | None = None,
+    ) -> float:
+        suite_reward = _suite_log_improvement(previous_suite_feedback, new_suite_feedback)
+        if suite_reward is None:
+            scale = max(1.0, abs(previous_score))
+            reward = (previous_score - new_score) / scale
+        else:
+            reward = suite_reward
         if not feasible:
             reward -= 1.0
         if signature in self._seen_signatures:
@@ -1315,6 +1331,26 @@ def _baseline_is_usable(baseline: WorkloadSuiteBaseline, suite: WorkloadSuite | 
         if value is None or value <= 0 or value == 1_000_000_000.0:
             return False
     return True
+
+
+def _suite_log_improvement(
+    previous: MultiWorkloadFeedback | None,
+    new: MultiWorkloadFeedback | None,
+) -> float | None:
+    previous_log_score = _suite_log_makespan_score(previous)
+    new_log_score = _suite_log_makespan_score(new)
+    if previous_log_score is None or new_log_score is None:
+        return None
+    return previous_log_score - new_log_score
+
+
+def _suite_log_makespan_score(feedback: MultiWorkloadFeedback | None) -> float | None:
+    if feedback is None or not feedback.runs:
+        return None
+    weighted_log_score = sum(float(run.weighted_log_score) for run in feedback.runs)
+    if not math.isfinite(weighted_log_score):
+        return None
+    return weighted_log_score
 
 
 def per_workload_single_task_scores(
