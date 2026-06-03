@@ -44,7 +44,7 @@
     "intra_rack_link_qty": [1],
     "inter_rack_topologies": ["none"],
     "inter_rack_link_qty": [1],
-    "max_candidates": 64
+    "max_candidates": 324
   },
   "mutation": {
     "min_intra_rack_link_qty": 1,

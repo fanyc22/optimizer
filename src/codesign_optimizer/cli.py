@@ -152,6 +152,16 @@ def exhaustive_optimizer(
         False,
         help="Keep rack fabric and inter-rack topology fields fixed to the template values.",
     ),
+    allow_empty_slots: bool = typer.Option(
+        True,
+        "--allow-empty-slots/--no-allow-empty-slots",
+        help="Let exhaustive enumeration remove devices by treating each slot as optionally empty.",
+    ),
+    min_occupied_slots: int | None = typer.Option(
+        None,
+        min=0,
+        help="Minimum occupied device slots per active compute/hybrid rack during exhaustive search.",
+    ),
     visualize_best: bool = typer.Option(
         True,
         "--visualize-best/--no-visualize-best",
@@ -175,6 +185,8 @@ def exhaustive_optimizer(
         concurrency=concurrency,
         max_candidates=max_candidates,
         freeze_topology=freeze_topology,
+        allow_empty_slots=allow_empty_slots,
+        min_occupied_slots=min_occupied_slots,
     )
     result = runner.run()
     visualization = _visualization_summary(
@@ -187,6 +199,8 @@ def exhaustive_optimizer(
         "[green]Exhaustive search completed[/green]\n"
         f"Total candidates: {result.total_candidates}\n"
         f"Unique candidates: {result.unique_candidates}\n"
+        f"Allow empty slots: {allow_empty_slots}\n"
+        f"Min occupied slots: {min_occupied_slots if min_occupied_slots is not None else 'unset'}\n"
         f"Evaluations: {len(result.history)}\n"
         f"Feasible evaluations: {len(result.feasible_candidates)}\n"
         f"Best score: {result.best.weighted_score:.4f}\n"

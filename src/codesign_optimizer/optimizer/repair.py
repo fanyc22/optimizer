@@ -19,9 +19,18 @@ class RepairReport:
 
 
 class CandidateRepairer:
-    def __init__(self, component_library: ComponentLibrary, search_space: SearchSpace) -> None:
+    def __init__(
+        self,
+        component_library: ComponentLibrary,
+        search_space: SearchSpace,
+        *,
+        min_occupied_slots: int | None = None,
+    ) -> None:
+        if min_occupied_slots is not None and min_occupied_slots < 0:
+            raise ValueError("min_occupied_slots must be >= 0")
         self._library = component_library
         self._space = search_space
+        self._min_occupied_slots = min_occupied_slots
 
     def repair_and_validate(self, chromosome: Chromosome) -> RepairReport:
         repaired = chromosome.model_copy(deep=True)
@@ -167,7 +176,7 @@ class CandidateRepairer:
         for rack in chromosome.racks:
             if rack.optional and not rack.active:
                 continue
-            min_occupied_slots = rack.limits.min_occupied_slots
+            min_occupied_slots = self._min_occupied_slots
             if min_occupied_slots is not None and len(rack.occupied_slots) < min_occupied_slots:
                 feasible = False
                 missing = min_occupied_slots - len(rack.occupied_slots)

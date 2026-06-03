@@ -116,7 +116,7 @@ def _space() -> SearchSpace:
                 "inter_rack_topologies": ["ring"],
                 "inter_rack_link_types": ["OPTICAL"],
                 "inter_rack_link_qty": [1],
-                "max_candidates": 4,
+                "max_candidates": 9,
             },
             "limits": {
                 "max_total_cost": 200000,
@@ -154,7 +154,6 @@ def _variable_occupancy_space() -> SearchSpace:
                             "intra_rack_link_type": "FAST",
                             "limits": {
                                 "max_slots": 4,
-                                "min_occupied_slots": 2,
                                 "max_memory_pool_count": 0,
                                 "max_switch_count": 1,
                             },
@@ -167,7 +166,6 @@ def _variable_occupancy_space() -> SearchSpace:
                 "slot_options": [
                     {"node_type": "GPU", "link_type": "FAST", "link_qty": 1},
                 ],
-                "allow_empty_slots": True,
                 "intra_rack_topologies": ["switch"],
                 "intra_rack_link_types": ["FAST"],
                 "intra_rack_link_qty": [1],
@@ -200,15 +198,15 @@ def test_exhaustive_enumeration_counts_example_space() -> None:
     for filename, rack_count, slots_per_rack, candidate_count in examples:
         space = SearchSpace.model_validate(load_jsonc(optimizer_root / "examples" / filename))
 
-        validate_exhaustive_space(space, component_library=catalog)
+        validate_exhaustive_space(space, component_library=catalog, allow_empty_slots=False)
 
         assert len(space.templates[0].racks) == rack_count
         assert all(rack.max_slots == slots_per_rack for rack in space.templates[0].racks)
-        assert count_exhaustive_candidates(space) == candidate_count
+        assert count_exhaustive_candidates(space, allow_empty_slots=False) == candidate_count
         chromosomes = (
-            iter_exhaustive_chromosomes(space)
+            iter_exhaustive_chromosomes(space, allow_empty_slots=False)
             if candidate_count <= 1024
-            else iter_exhaustive_chromosomes(space, freeze_topology=True)
+            else iter_exhaustive_chromosomes(space, freeze_topology=True, allow_empty_slots=False)
         )
         assert len(chromosomes) == (candidate_count if candidate_count <= 1024 else 256)
         assert all(
@@ -228,9 +226,16 @@ def test_exhaustive_freeze_topology_reduces_topology_examples() -> None:
     for filename, unfrozen_count, frozen_count in examples:
         space = SearchSpace.model_validate(load_jsonc(optimizer_root / "examples" / filename))
 
-        assert count_exhaustive_candidates(space) == unfrozen_count
-        assert count_exhaustive_candidates(space, freeze_topology=True) == frozen_count
-        frozen_chromosomes = iter_exhaustive_chromosomes(space, freeze_topology=True)
+        assert count_exhaustive_candidates(space, allow_empty_slots=False) == unfrozen_count
+        assert (
+            count_exhaustive_candidates(space, freeze_topology=True, allow_empty_slots=False)
+            == frozen_count
+        )
+        frozen_chromosomes = iter_exhaustive_chromosomes(
+            space,
+            freeze_topology=True,
+            allow_empty_slots=False,
+        )
         assert len(frozen_chromosomes) == frozen_count
         assert all(
             rack.intra_rack_topology == "switch"
@@ -259,8 +264,8 @@ def test_exhaustive_runner_finds_best_candidate(tmp_path: Path) -> None:
         for rack in result.best.chromosome.racks
         for slot in rack.slots
     ]
-    assert result.total_candidates == 4
-    assert result.unique_candidates == 4
+    assert result.total_candidates == 9
+    assert result.unique_candidates == 9
     assert pipeline.calls == 4
     assert result.best.feasible
     assert len(result.feasible_candidates) == 4
@@ -300,8 +305,8 @@ def test_exhaustive_runner_outputs_feasible_candidates_under_rack_cost_limit(tmp
 
     result = runner.run()
 
-    assert result.total_candidates == 4
-    assert result.unique_candidates == 4
+    assert result.total_candidates == 9
+    assert result.unique_candidates == 9
     assert len(result.feasible_candidates) == 1
     assert pipeline.calls == 1
     feasible_types = [
@@ -343,6 +348,7 @@ def test_exhaustive_can_enumerate_empty_slots_under_min_occupancy(tmp_path: Path
         workload_path=workload,
         out_dir=tmp_path / "exhaustive",
         concurrency=2,
+        min_occupied_slots=2,
     )
 
     result = runner.run()

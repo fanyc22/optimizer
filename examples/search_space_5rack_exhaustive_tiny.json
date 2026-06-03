@@ -132,7 +132,7 @@
     "inter_rack_topologies": ["ring"],
     "inter_rack_link_types": ["OPTICAL_400G"],
     "inter_rack_link_qty": [1],
-    "max_candidates": 1024
+    "max_candidates": 59049
   },
   "mutation": {
     "min_intra_rack_link_qty": 1,
