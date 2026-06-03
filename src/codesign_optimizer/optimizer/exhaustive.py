@@ -57,6 +57,7 @@ class ExhaustiveEvaluation:
 @dataclass(frozen=True)
 class ExhaustiveSearchResult:
     history: list[ExhaustiveEvaluation]
+    feasible_candidates: list[ExhaustiveEvaluation]
     best: ExhaustiveEvaluation
     total_candidates: int
     unique_candidates: int
@@ -125,17 +126,25 @@ class ExhaustiveSearchRunner:
         )
 
         history = self._evaluate_chromosomes(chromosomes)
+        feasible_candidates = [item for item in history if item.feasible]
         best = min(history, key=lambda item: item.weighted_score)
-        self._persist_final(history, best, total_candidates=total_candidates, unique_candidates=unique_candidates)
+        self._persist_final(
+            history,
+            feasible_candidates,
+            best,
+            total_candidates=total_candidates,
+            unique_candidates=unique_candidates,
+        )
         logger.info(
             "Exhaustive search finished: evaluated=%d feasible=%d best_score=%.4f feasible_best=%s",
             len(history),
-            sum(1 for item in history if item.feasible),
+            len(feasible_candidates),
             best.weighted_score,
             best.feasible,
         )
         return ExhaustiveSearchResult(
             history=history,
+            feasible_candidates=feasible_candidates,
             best=best,
             total_candidates=total_candidates,
             unique_candidates=unique_candidates,
@@ -278,29 +287,47 @@ class ExhaustiveSearchRunner:
     def _persist_final(
         self,
         history: list[ExhaustiveEvaluation],
+        feasible_candidates: list[ExhaustiveEvaluation],
         best: ExhaustiveEvaluation,
         *,
         total_candidates: int,
         unique_candidates: int,
     ) -> None:
+        best_feasible = min(feasible_candidates, key=lambda item: item.weighted_score) if feasible_candidates else None
         summary = {
             "mode": "exhaustive",
             "total_candidates": total_candidates,
             "unique_candidates": unique_candidates,
             "evaluations": len(history),
-            "feasible_evaluations": sum(1 for item in history if item.feasible),
+            "feasible_evaluations": len(feasible_candidates),
             "best_score": best.weighted_score,
             "best_feasible": best.feasible,
+            "best_feasible_score": best_feasible.weighted_score if best_feasible is not None else None,
+            "best_feasible_index": best_feasible.index if best_feasible is not None else None,
             "freeze_topology": self._freeze_topology,
             "best": best.to_summary(),
         }
         dump_json(self._out_dir / "exhaustive_summary.json", summary)
+        dump_json(
+            self._out_dir / "feasible_summary.json",
+            {
+                "feasible_evaluations": len(feasible_candidates),
+                "feasible_indices": [item.index for item in feasible_candidates],
+                "best_feasible": best_feasible.to_summary() if best_feasible is not None else None,
+            },
+        )
         with (self._out_dir / "candidate_scores.jsonl").open("w", encoding="utf-8") as handle:
             for evaluation in history:
+                handle.write(json.dumps(evaluation.to_summary(), sort_keys=True, separators=(",", ":")) + "\n")
+        with (self._out_dir / "feasible_candidates.jsonl").open("w", encoding="utf-8") as handle:
+            for evaluation in feasible_candidates:
                 handle.write(json.dumps(evaluation.to_summary(), sort_keys=True, separators=(",", ":")) + "\n")
         if best.exported is not None:
             dump_json(self._out_dir / "best_hardware_topology.json", best.exported.hardware_topology)
             dump_json(self._out_dir / "best_proposal.json", best.exported.proposal.to_dict())
+        if best_feasible is not None and best_feasible.exported is not None:
+            dump_json(self._out_dir / "best_feasible_hardware_topology.json", best_feasible.exported.hardware_topology)
+            dump_json(self._out_dir / "best_feasible_proposal.json", best_feasible.exported.proposal.to_dict())
 
     def _cached_evaluation(self, signature: str) -> ExhaustiveEvaluation | None:
         with self._cache_lock:

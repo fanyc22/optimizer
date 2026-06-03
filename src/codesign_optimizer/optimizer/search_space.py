@@ -13,6 +13,7 @@ class SearchLimits(BaseModel):
 
     max_total_cost: float = Field(default=1_000_000_000.0, ge=0)
     max_peak_power_watts: float = Field(default=1_000_000_000.0, ge=0)
+    max_rack_cost: float = Field(default=1_000_000_000.0, ge=0)
     max_rack_power_watts: float = Field(default=100_000.0, ge=0)
     max_rack_units: float = Field(default=42.0, ge=0)
     max_total_racks: int | None = Field(default=None, ge=1)
@@ -160,6 +161,7 @@ class RackCapacityLimits(BaseModel):
     max_slots: int | None = Field(default=None, ge=0)
     max_memory_pool_count: int | None = Field(default=None, ge=0)
     max_switch_count: int | None = Field(default=None, ge=0)
+    max_cost: float | None = Field(default=None, ge=0)
     max_rack_units: float | None = Field(default=None, ge=0)
     max_power_watts: float | None = Field(default=None, ge=0)
 

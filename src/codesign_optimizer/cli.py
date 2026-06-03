@@ -163,9 +163,10 @@ def exhaustive_optimizer(
         f"Total candidates: {result.total_candidates}\n"
         f"Unique candidates: {result.unique_candidates}\n"
         f"Evaluations: {len(result.history)}\n"
-        f"Feasible evaluations: {sum(1 for item in result.history if item.feasible)}\n"
+        f"Feasible evaluations: {len(result.feasible_candidates)}\n"
         f"Best score: {result.best.weighted_score:.4f}\n"
         f"Best feasible: {result.best.feasible}\n"
+        f"Feasible candidates: {out / 'feasible_candidates.jsonl'}\n"
         f"Artifacts: {out}"
     )
 

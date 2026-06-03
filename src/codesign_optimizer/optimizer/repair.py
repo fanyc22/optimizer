@@ -190,11 +190,19 @@ class CandidateRepairer:
                 messages=messages,
             )
             rack_power = 0.0
+            rack_cost = 0.0
             rack_units = 0.0
             for type_name, count in self._rack_type_counts(rack):
                 spec = self._library.node_types[type_name]
+                rack_cost += spec.cost_unit * count
                 rack_power += spec.tdp_watts * count
                 rack_units += spec.rack_units * count
+            rack_cost += self._rack_local_link_cost(rack)
+            rack_cost_limit = (
+                rack.limits.max_cost
+                if rack.limits.max_cost is not None
+                else limits.max_rack_cost
+            )
             rack_power_limit = (
                 rack.limits.max_power_watts
                 if rack.limits.max_power_watts is not None
@@ -205,6 +213,13 @@ class CandidateRepairer:
                 if rack.limits.max_rack_units is not None
                 else limits.max_rack_units
             )
+            if rack_cost > rack_cost_limit:
+                feasible = False
+                penalty += rack_cost - rack_cost_limit
+                messages.append(
+                    f"{rack.rack_id} cost exceeds limit: "
+                    f"{rack_cost:.3f} > {rack_cost_limit:.3f}"
+                )
             if rack_power > rack_power_limit:
                 feasible = False
                 penalty += rack_power - rack_power_limit
@@ -220,6 +235,36 @@ class CandidateRepairer:
                     f"{rack_units:.3f} > {rack_units_limit:.3f}"
                 )
         return feasible, penalty
+
+    def _rack_local_link_cost(self, rack: RackGene) -> float:
+        if rack.intra_rack_topology == "none":
+            return 0.0
+        if rack.intra_rack_topology == "switch":
+            endpoint_cost = sum(
+                self._link_cost(slot.link_type or rack.intra_rack_link_type, slot.link_qty or rack.intra_rack_link_qty)
+                for slot in rack.occupied_slots
+            )
+            memory_cost = 0.0
+            if rack.memory_pool_count:
+                memory_cost = rack.memory_pool_count * self._link_cost(
+                    rack.memory_link_type or rack.intra_rack_link_type,
+                    rack.memory_link_qty,
+                )
+            return endpoint_cost + memory_cost
+
+        node_count = len(rack.occupied_slots) + rack.memory_pool_count
+        if node_count <= 1:
+            return 0.0
+        if rack.intra_rack_topology == "fully_connected":
+            pair_count = node_count * (node_count - 1) // 2
+        else:
+            pair_count = 1 if node_count == 2 else node_count
+        return pair_count * self._link_cost(rack.intra_rack_link_type, rack.intra_rack_link_qty)
+
+    def _link_cost(self, link_type: str | None, qty: int) -> float:
+        if link_type is None or link_type not in self._library.link_types:
+            return 0.0
+        return self._library.link_types[link_type].cost_unit * qty
 
     def _check_rack_device_limits(
         self,

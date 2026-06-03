@@ -207,6 +207,42 @@ def test_exhaustive_runner_finds_best_candidate(tmp_path: Path) -> None:
     assert result.unique_candidates == 4
     assert pipeline.calls == 4
     assert result.best.feasible
+    assert len(result.feasible_candidates) == 4
     assert best_types == ["GPU", "GPU"]
     assert (tmp_path / "exhaustive" / "best_hardware_topology.json").exists()
     assert (tmp_path / "exhaustive" / "exhaustive_summary.json").exists()
+    assert (tmp_path / "exhaustive" / "feasible_candidates.jsonl").exists()
+    assert (tmp_path / "exhaustive" / "feasible_summary.json").exists()
+
+
+def test_exhaustive_runner_outputs_feasible_candidates_under_rack_cost_limit(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    space = _space().model_copy(deep=True)
+    space.limits.max_rack_cost = 15_000
+    pipeline = TopologyAwarePipeline()
+    runner = ExhaustiveSearchRunner(
+        component_library=_library(),
+        search_space=space,
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=tmp_path / "exhaustive",
+        concurrency=2,
+    )
+
+    result = runner.run()
+
+    assert result.total_candidates == 4
+    assert result.unique_candidates == 4
+    assert len(result.feasible_candidates) == 1
+    assert pipeline.calls == 1
+    feasible_types = [
+        slot.node_type
+        for rack in result.feasible_candidates[0].chromosome.racks
+        for slot in rack.slots
+    ]
+    assert feasible_types == ["CPU", "CPU"]
+    feasible_lines = (tmp_path / "exhaustive" / "feasible_candidates.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(feasible_lines) == 1
+    feasible_summary = json.loads((tmp_path / "exhaustive" / "feasible_summary.json").read_text(encoding="utf-8"))
+    assert feasible_summary["feasible_evaluations"] == 1
