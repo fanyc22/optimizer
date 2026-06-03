@@ -123,6 +123,7 @@ class ExhaustiveSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slot_options: list[ExhaustiveSlotOption] = Field(default_factory=list)
+    allow_empty_slots: bool = False
     intra_rack_topologies: list[str] | None = None
     intra_rack_link_types: list[str] | None = None
     intra_rack_link_qty: list[int] | None = None
@@ -159,6 +160,7 @@ class RackCapacityLimits(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     max_slots: int | None = Field(default=None, ge=0)
+    min_occupied_slots: int | None = Field(default=None, ge=0)
     max_memory_pool_count: int | None = Field(default=None, ge=0)
     max_switch_count: int | None = Field(default=None, ge=0)
     max_cost: float | None = Field(default=None, ge=0)
@@ -207,6 +209,14 @@ class RackSpec(BaseModel):
             self.limits.max_slots = self.max_slots
         if self.limits.max_slots is not None and self.max_slots > self.limits.max_slots:
             raise ValueError(f"rack {self.rack_id} max_slots exceeds limits.max_slots")
+        if (
+            self.limits.min_occupied_slots is not None
+            and self.limits.max_slots is not None
+            and self.limits.min_occupied_slots > self.limits.max_slots
+        ):
+            raise ValueError(
+                f"rack {self.rack_id} limits.min_occupied_slots exceeds limits.max_slots"
+            )
         if self.optional and not self.active:
             return self
         if self.intra_rack_topology == "switch" and self.switch_count <= 0:

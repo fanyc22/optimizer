@@ -132,6 +132,61 @@ def _space() -> SearchSpace:
     )
 
 
+def _variable_occupancy_space() -> SearchSpace:
+    return SearchSpace.model_validate(
+        {
+            "seed": 7,
+            "templates": [
+                {
+                    "name": "variable_occupancy",
+                    "racks": [
+                        {
+                            "rack_id": "rack0",
+                            "role": "compute",
+                            "max_slots": 4,
+                            "slots": [
+                                {"slot_id": f"slot{index}", "node_type": "GPU", "link_type": "FAST"}
+                                for index in range(4)
+                            ],
+                            "switch_count": 1,
+                            "switch_type": "SW",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
+                            "limits": {
+                                "max_slots": 4,
+                                "min_occupied_slots": 2,
+                                "max_memory_pool_count": 0,
+                                "max_switch_count": 1,
+                            },
+                        }
+                    ],
+                    "inter_rack": "none",
+                }
+            ],
+            "exhaustive": {
+                "slot_options": [
+                    {"node_type": "GPU", "link_type": "FAST", "link_qty": 1},
+                ],
+                "allow_empty_slots": True,
+                "intra_rack_topologies": ["switch"],
+                "intra_rack_link_types": ["FAST"],
+                "intra_rack_link_qty": [1],
+                "inter_rack_topologies": ["none"],
+            },
+            "limits": {
+                "max_total_cost": 200000,
+                "max_peak_power_watts": 20000,
+                "max_rack_power_watts": 10000,
+                "max_total_racks": 1,
+                "min_compute_racks": 1,
+                "max_compute_racks": 1,
+                "max_memory_racks": 0,
+                "max_hybrid_racks": 0,
+            },
+        }
+    )
+
+
 def test_exhaustive_enumeration_counts_example_space() -> None:
     optimizer_root = Path(__file__).resolve().parents[1]
     catalog = load_component_library(load_jsonc(optimizer_root / "examples" / "component_catalog_tcro_latent_rack.json"))
@@ -259,3 +314,46 @@ def test_exhaustive_runner_outputs_feasible_candidates_under_rack_cost_limit(tmp
     assert len(feasible_lines) == 1
     feasible_summary = json.loads((tmp_path / "exhaustive" / "feasible_summary.json").read_text(encoding="utf-8"))
     assert feasible_summary["feasible_evaluations"] == 1
+
+
+def test_exhaustive_can_enumerate_empty_slots_under_min_occupancy(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    space = _variable_occupancy_space()
+
+    chromosomes = iter_exhaustive_chromosomes(space)
+    empty_slots = [
+        slot
+        for chromosome in chromosomes
+        for rack in chromosome.racks
+        for slot in rack.slots
+        if slot.node_type is None
+    ]
+
+    assert count_exhaustive_candidates(space) == 16
+    assert len(chromosomes) == 16
+    assert empty_slots
+    assert all(slot.link_type is None and slot.link_qty is None for slot in empty_slots)
+
+    pipeline = TopologyAwarePipeline()
+    runner = ExhaustiveSearchRunner(
+        component_library=_library(),
+        search_space=space,
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=tmp_path / "exhaustive",
+        concurrency=2,
+    )
+
+    result = runner.run()
+
+    occupied_counts = {
+        len(rack.occupied_slots)
+        for evaluation in result.feasible_candidates
+        for rack in evaluation.chromosome.racks
+    }
+    assert result.total_candidates == 16
+    assert result.unique_candidates == 16
+    assert len(result.feasible_candidates) == 11
+    assert pipeline.calls == 11
+    assert occupied_counts == {2, 3, 4}

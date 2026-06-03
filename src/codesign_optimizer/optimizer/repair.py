@@ -167,7 +167,18 @@ class CandidateRepairer:
         for rack in chromosome.racks:
             if rack.optional and not rack.active:
                 continue
+            min_occupied_slots = rack.limits.min_occupied_slots
+            if min_occupied_slots is not None and len(rack.occupied_slots) < min_occupied_slots:
+                feasible = False
+                missing = min_occupied_slots - len(rack.occupied_slots)
+                penalty += missing * 1000.0
+                messages.append(
+                    f"{rack.rack_id} occupied slots below minimum: "
+                    f"{len(rack.occupied_slots)} < {min_occupied_slots}"
+                )
             if rack.role in {"compute", "hybrid"} and not rack.occupied_slots:
+                if min_occupied_slots is not None:
+                    continue
                 feasible = False
                 penalty += 100_000.0
                 messages.append(f"{rack.rack_id} has no occupied compute slots")

@@ -113,6 +113,7 @@ class ExhaustiveSearchRunner:
                     option.model_dump(mode="json", exclude_none=True)
                     for option in self._space.exhaustive.slot_options
                 ],
+                "allow_empty_slots": self._space.exhaustive.allow_empty_slots,
                 "max_candidates": cap,
                 "freeze_topology": self._freeze_topology,
             },
@@ -343,7 +344,7 @@ def validate_exhaustive_space(
     *,
     component_library: ComponentLibrary | None = None,
 ) -> None:
-    if not space.exhaustive.slot_options:
+    if not space.exhaustive.slot_options and not space.exhaustive.allow_empty_slots:
         raise ValueError("exhaustive.slot_options must list the finite slot choices")
     if space.rack_archetypes:
         raise ValueError("exhaustive search requires rack_archetypes to be empty")
@@ -428,6 +429,10 @@ def _rack_variants(rack: RackGene, space: SearchSpace, *, freeze_topology: bool 
         variant = rack.model_copy(deep=True)
         for slot, option in zip(variant.slots, slot_options, strict=True):
             slot.node_type = option.node_type
+            if option.node_type is None:
+                slot.link_type = None
+                slot.link_qty = None
+                continue
             if option.link_type is not None:
                 slot.link_type = option.link_type
             if option.link_qty is not None:
@@ -440,15 +445,38 @@ def _rack_variants(rack: RackGene, space: SearchSpace, *, freeze_topology: bool 
 
 
 def _slot_options_for_slot(slot: Any, space: SearchSpace) -> list[ExhaustiveSlotOption]:
+    options: list[ExhaustiveSlotOption]
     if space.exhaustive.slot_options:
-        return space.exhaustive.slot_options
-    return [
-        ExhaustiveSlotOption(
-            node_type=slot.node_type,
-            link_type=slot.link_type,
-            link_qty=slot.link_qty,
-        )
-    ]
+        options = list(space.exhaustive.slot_options)
+    else:
+        options = [
+            ExhaustiveSlotOption(
+                node_type=slot.node_type,
+                link_type=slot.link_type,
+                link_qty=slot.link_qty,
+            )
+        ]
+    if space.exhaustive.allow_empty_slots:
+        options.append(ExhaustiveSlotOption())
+    return _dedupe_slot_options(options)
+
+
+def _dedupe_slot_options(options: list[ExhaustiveSlotOption]) -> list[ExhaustiveSlotOption]:
+    seen: set[tuple[str | None, str | None, int | None]] = set()
+    deduped: list[ExhaustiveSlotOption] = []
+    for option in options:
+        key = _slot_option_key(option)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(option)
+    return deduped
+
+
+def _slot_option_key(option: ExhaustiveSlotOption) -> tuple[str | None, str | None, int | None]:
+    if option.node_type is None:
+        return (None, None, None)
+    return (option.node_type, option.link_type, option.link_qty)
 
 
 def _choices(values: list[Any] | None, fallback: Any, freeze_topology: bool = False) -> list[Any]:
