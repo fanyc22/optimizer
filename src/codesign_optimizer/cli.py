@@ -91,6 +91,11 @@ def search_optimizer(
         max=1024,
         help="Maximum number of candidate mapper/simulator pipeline runs to execute concurrently per generation.",
     ),
+    visualize_best: bool = typer.Option(
+        True,
+        "--visualize-best/--no-visualize-best",
+        help="Render best_hardware_topology visualization after search.",
+    ),
     out: Path = typer.Option(Path("artifacts/search_run"), help="Search output directory."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
 ) -> None:
@@ -111,6 +116,12 @@ def search_optimizer(
         concurrency=concurrency,
     )
     result = runner.run()
+    visualization = _visualization_summary(
+        _render_best_hardware_visualizations(out_dir=out, repo_root=repo_root, title_prefix="heuristic search")
+        if visualize_best
+        else [],
+        requested=visualize_best,
+    )
     console.print(
         "[green]Heuristic search completed[/green]\n"
         f"Generations: {generations}\n"
@@ -120,6 +131,7 @@ def search_optimizer(
         f"Pareto candidates: {len(result.pareto_frontier)}\n"
         f"Best score: {result.best.weighted_score:.4f}\n"
         f"Best feasible: {result.best.feasible}\n"
+        f"{visualization}"
         f"Artifacts: {out}"
     )
 
@@ -165,19 +177,12 @@ def exhaustive_optimizer(
         freeze_topology=freeze_topology,
     )
     result = runner.run()
-    visualization = ""
-    if visualize_best:
-        visualization_path = _render_topology_visualization(
-            topology_path=out / "best_hardware_topology.json",
-            output_path=out / "best_hardware_topology.svg",
-            repo_root=repo_root,
-            title="exhaustive best hardware",
-            preferred_format="svg",
-        )
-        if visualization_path is not None:
-            visualization = f"Visualization: {visualization_path}\n"
-        else:
-            visualization = "Visualization: unavailable\n"
+    visualization = _visualization_summary(
+        _render_best_hardware_visualizations(out_dir=out, repo_root=repo_root, title_prefix="exhaustive search")
+        if visualize_best
+        else [],
+        requested=visualize_best,
+    )
     console.print(
         "[green]Exhaustive search completed[/green]\n"
         f"Total candidates: {result.total_candidates}\n"
@@ -213,6 +218,11 @@ def tcro_optimizer(
     rack_activation_threshold: float = typer.Option(0.5, min=0.0, help="Optional rack active_alpha threshold."),
     latent_rack_initial_alpha: float = typer.Option(0.2, min=0.0, help="Default initial alpha for inactive optional rack slots."),
     checkpoint_interval: int = typer.Option(1, min=1, help="Write supernet_state.json every N steps."),
+    visualize_best: bool = typer.Option(
+        True,
+        "--visualize-best/--no-visualize-best",
+        help="Render best_hardware_topology visualization after TCRO search.",
+    ),
     out: Path = typer.Option(Path("artifacts/tcro_run"), help="TCRO output directory."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
 ) -> None:
@@ -243,6 +253,12 @@ def tcro_optimizer(
         ),
     )
     result = runner.run()
+    visualization = _visualization_summary(
+        _render_best_hardware_visualizations(out_dir=out, repo_root=repo_root, title_prefix="tcro search")
+        if visualize_best
+        else [],
+        requested=visualize_best,
+    )
     console.print(
         "[green]TCRO search completed[/green]\n"
         f"Steps: {steps}\n"
@@ -251,6 +267,7 @@ def tcro_optimizer(
         f"Evaluations: {len(result.history)}\n"
         f"Best score: {result.best.weighted_score:.4f}\n"
         f"Best feasible: {result.best.feasible}\n"
+        f"{visualization}"
         f"Artifacts: {out}"
     )
 
@@ -314,6 +331,11 @@ def tgrl_optimizer(
     freeze_topology: bool = typer.Option(
         False,
         help="Keep rack count, slot occupancy, and fabric topology fixed.",
+    ),
+    visualize_best: bool = typer.Option(
+        True,
+        "--visualize-best/--no-visualize-best",
+        help="Render best_hardware_topology visualization after TG-RL search.",
     ),
     out: Path = typer.Option(Path("artifacts/tgrl_run"), help="TG-RL output directory."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
@@ -381,6 +403,12 @@ def tgrl_optimizer(
             ),
         )
         result_v2 = runner_v2.run()
+        visualization = _visualization_summary(
+            _render_best_hardware_visualizations(out_dir=out, repo_root=repo_root, title_prefix="tgrl v2 search")
+            if visualize_best
+            else [],
+            requested=visualize_best,
+        )
         per_workload = ""
         if result_v2.best.suite_feedback is not None:
             score_by_workload = {
@@ -408,6 +436,7 @@ def tgrl_optimizer(
             f"Global best score: {runner_v2.global_best_score:.4f}\n"
             f"Best feasible: {result_v2.best.feasible}\n"
             f"{per_workload}"
+            f"{visualization}"
             f"Artifacts: {out}"
         )
         return
@@ -436,6 +465,12 @@ def tgrl_optimizer(
         ),
     )
     result = runner.run()
+    visualization = _visualization_summary(
+        _render_best_hardware_visualizations(out_dir=out, repo_root=repo_root, title_prefix=f"tgrl {mode} search")
+        if visualize_best
+        else [],
+        requested=visualize_best,
+    )
     console.print(
         "[green]TG-RL search completed[/green]\n"
         f"Mode: {mode}\n"
@@ -446,12 +481,49 @@ def tgrl_optimizer(
         f"Trajectory items: {len(result.trajectory)}\n"
         f"Best score: {result.best.weighted_score:.4f}\n"
         f"Best feasible: {result.best.feasible}\n"
+        f"{visualization}"
         f"Artifacts: {out}"
     )
 
 
 def _default_repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+def _render_best_hardware_visualizations(
+    *,
+    out_dir: Path,
+    repo_root: Path,
+    title_prefix: str,
+) -> list[Path]:
+    rendered: list[Path] = []
+    for topology_name in ("best_hardware_topology.json", "best_feasible_hardware_topology.json"):
+        topology_path = out_dir / topology_name
+        if not topology_path.exists():
+            continue
+        title = f"{title_prefix} {topology_path.stem.replace('_', ' ')}"
+        output_path = topology_path.with_suffix(".svg")
+        visualization = _render_topology_visualization(
+            topology_path=topology_path,
+            output_path=output_path,
+            repo_root=repo_root,
+            title=title,
+            preferred_format="svg",
+        )
+        if visualization is not None:
+            rendered.append(visualization)
+    return rendered
+
+
+def _visualization_summary(paths: list[Path], *, requested: bool) -> str:
+    if not requested:
+        return ""
+    if not paths:
+        return "Visualization: unavailable\n"
+    if len(paths) == 1:
+        return f"Visualization: {paths[0]}\n"
+    body = "\n".join(f"  {path}" for path in paths)
+    return f"Visualizations:\n{body}\n"
 
 
 def _render_topology_visualization(
