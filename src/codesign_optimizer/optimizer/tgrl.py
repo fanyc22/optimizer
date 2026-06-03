@@ -921,7 +921,12 @@ def build_masked_actions(
         component_library=component_library,
         search_space=search_space,
     ):
-        if not _action_allowed_by_config(action, search_space=search_space, config=config):
+        if not _action_allowed_by_config(
+            action,
+            chromosome=chromosome,
+            search_space=search_space,
+            config=config,
+        ):
             continue
         candidate = apply_graph_edit_action(chromosome, action, search_space=search_space)
         repair = repairer.repair_and_validate(candidate)
@@ -967,18 +972,66 @@ def build_masked_actions(
 def _action_allowed_by_config(
     action: GraphEditAction,
     *,
+    chromosome: Chromosome,
     search_space: SearchSpace,
     config: TGRLConfig,
 ) -> bool:
-    if not config.freeze_topology:
-        return True
     if action.action_type in TOPOLOGY_CHANGING_ACTION_TYPES:
-        return False
+        if config.freeze_topology:
+            return False
+        if not _topology_action_allowed_by_exhaustive_space(action, chromosome, search_space):
+            return False
     if action.action_type in {"replace_node_type", "upgrade_node", "downgrade_node"}:
         allowed_node_types = _exhaustive_slot_node_types(search_space)
         if allowed_node_types and action.target not in allowed_node_types:
             return False
+    if action.action_type == "add_node_to_slot":
+        allowed_node_types = _exhaustive_slot_node_types(search_space)
+        if allowed_node_types and action.target not in allowed_node_types:
+            return False
+    if (
+        action.action_type == "remove_node_from_slot"
+        and search_space.exhaustive.slot_options
+        and not search_space.exhaustive.allow_empty_slots
+    ):
+        return False
     return True
+
+
+def _topology_action_allowed_by_exhaustive_space(
+    action: GraphEditAction,
+    chromosome: Chromosome,
+    search_space: SearchSpace,
+) -> bool:
+    exhaustive = search_space.exhaustive
+    if action.action_type == "change_intra_rack_topology":
+        return _target_in_optional_values(action.target, exhaustive.intra_rack_topologies)
+    if action.action_type == "change_inter_rack_topology":
+        return _target_in_optional_values(action.target, exhaustive.inter_rack_topologies)
+    if action.action_type in {"upgrade_intra_rack_link", "downgrade_intra_rack_link"}:
+        if action.target and not _target_in_optional_values(action.target, exhaustive.intra_rack_link_types):
+            return False
+        if action.delta and exhaustive.intra_rack_link_qty is not None:
+            rack = _find_rack(chromosome, action.rack_id)
+            if rack is None:
+                return False
+            next_qty = max(1, rack.intra_rack_link_qty + action.delta)
+            if next_qty not in exhaustive.intra_rack_link_qty:
+                return False
+        return True
+    if action.action_type in {"upgrade_inter_rack_link", "downgrade_inter_rack_link"}:
+        if action.target and not _target_in_optional_values(action.target, exhaustive.inter_rack_link_types):
+            return False
+        if action.delta and exhaustive.inter_rack_link_qty is not None:
+            next_qty = max(1, chromosome.inter_rack_link_qty + action.delta)
+            if next_qty not in exhaustive.inter_rack_link_qty:
+                return False
+        return True
+    return True
+
+
+def _target_in_optional_values(target: str, values: list[str] | None) -> bool:
+    return values is None or target in values
 
 
 def apply_graph_edit_action(
@@ -1025,8 +1078,10 @@ def apply_graph_edit_action(
         slot = _find_slot(rack, action.resource)
         if slot is not None and not slot.node_type:
             slot.node_type = action.target
+            if search_space is not None:
+                _apply_exhaustive_slot_link_option(slot, action.target, search_space)
             slot.link_type = slot.link_type or rack.intra_rack_link_type
-            slot.link_qty = rack.intra_rack_link_qty
+            slot.link_qty = slot.link_qty or rack.intra_rack_link_qty
         return result
     if action.action_type == "remove_node_from_slot" and rack is not None:
         slot = _find_slot(rack, action.resource)
