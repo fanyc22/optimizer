@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 import typer
 from rich.console import Console
@@ -138,6 +140,11 @@ def exhaustive_optimizer(
         False,
         help="Keep rack fabric and inter-rack topology fields fixed to the template values.",
     ),
+    visualize_best: bool = typer.Option(
+        True,
+        "--visualize-best/--no-visualize-best",
+        help="Render best_hardware_topology visualization after exhaustive search.",
+    ),
     out: Path = typer.Option(Path("artifacts/exhaustive_run"), help="Search output directory."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
 ) -> None:
@@ -158,6 +165,19 @@ def exhaustive_optimizer(
         freeze_topology=freeze_topology,
     )
     result = runner.run()
+    visualization = ""
+    if visualize_best:
+        visualization_path = _render_topology_visualization(
+            topology_path=out / "best_hardware_topology.json",
+            output_path=out / "best_hardware_topology.svg",
+            repo_root=repo_root,
+            title="exhaustive best hardware",
+            preferred_format="svg",
+        )
+        if visualization_path is not None:
+            visualization = f"Visualization: {visualization_path}\n"
+        else:
+            visualization = "Visualization: unavailable\n"
     console.print(
         "[green]Exhaustive search completed[/green]\n"
         f"Total candidates: {result.total_candidates}\n"
@@ -167,6 +187,7 @@ def exhaustive_optimizer(
         f"Best score: {result.best.weighted_score:.4f}\n"
         f"Best feasible: {result.best.feasible}\n"
         f"Feasible candidates: {out / 'feasible_candidates.jsonl'}\n"
+        f"{visualization}"
         f"Artifacts: {out}"
     )
 
@@ -431,6 +452,89 @@ def tgrl_optimizer(
 
 def _default_repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+def _render_topology_visualization(
+    *,
+    topology_path: Path,
+    output_path: Path,
+    repo_root: Path,
+    title: str,
+    preferred_format: str = "svg",
+) -> Path | None:
+    topology_path = topology_path.resolve()
+    output_path = output_path.resolve()
+    repo_root = repo_root.resolve()
+    if not topology_path.exists():
+        return None
+    script = repo_root / "tools" / "visualize_hardware_topology.py"
+    if not script.exists():
+        return None
+    log_path = output_path.with_name("visualization.log")
+    rendered = _run_visualization_command(
+        script=script,
+        topology_path=topology_path,
+        output_path=output_path,
+        title=title,
+        fmt=preferred_format,
+        log_path=log_path,
+    )
+    if rendered is not None:
+        return rendered
+    if preferred_format != "dot":
+        fallback_path = output_path.with_suffix(".dot")
+        return _run_visualization_command(
+            script=script,
+            topology_path=topology_path,
+            output_path=fallback_path,
+            title=title,
+            fmt="dot",
+            log_path=log_path,
+        )
+    return None
+
+
+def _run_visualization_command(
+    *,
+    script: Path,
+    topology_path: Path,
+    output_path: Path,
+    title: str,
+    fmt: str,
+    log_path: Path,
+) -> Path | None:
+    cmd = [
+        sys.executable,
+        str(script),
+        "--topology",
+        str(topology_path),
+        "--out",
+        str(output_path),
+        "--format",
+        fmt,
+        "--rankdir",
+        "LR",
+        "--title",
+        title,
+        "--summary",
+    ]
+    result = subprocess.run(
+        cmd,
+        cwd=script.parents[1],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n" + "=" * 80 + "\n")
+        handle.write("command: " + " ".join(cmd) + "\n")
+        handle.write(result.stdout)
+        handle.write(f"\nreturncode: {result.returncode}\n")
+    if result.returncode == 0 and output_path.exists():
+        return output_path
+    return None
 
 
 if __name__ == "__main__":

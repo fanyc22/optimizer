@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from codesign_optimizer.io.jsonc import load_jsonc
+from codesign_optimizer.cli import _render_topology_visualization
 from codesign_optimizer.models.hardware import ComponentLibrary
 from codesign_optimizer.optimizer.exhaustive import (
     ExhaustiveSearchRunner,
@@ -213,6 +214,16 @@ def test_exhaustive_runner_finds_best_candidate(tmp_path: Path) -> None:
     assert (tmp_path / "exhaustive" / "exhaustive_summary.json").exists()
     assert (tmp_path / "exhaustive" / "feasible_candidates.jsonl").exists()
     assert (tmp_path / "exhaustive" / "feasible_summary.json").exists()
+    repo_root = Path(__file__).resolve().parents[2]
+    visualization = _render_topology_visualization(
+        topology_path=tmp_path / "exhaustive" / "best_hardware_topology.json",
+        output_path=tmp_path / "exhaustive" / "best_hardware_topology.dot",
+        repo_root=repo_root,
+        title="test exhaustive best",
+        preferred_format="dot",
+    )
+    assert visualization == (tmp_path / "exhaustive" / "best_hardware_topology.dot").resolve()
+    assert visualization.exists()
 
 
 def test_exhaustive_runner_outputs_feasible_candidates_under_rack_cost_limit(tmp_path: Path) -> None:
