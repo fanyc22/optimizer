@@ -1,4 +1,5 @@
 import json
+import math
 from pathlib import Path
 import tempfile
 import threading
@@ -25,7 +26,12 @@ from codesign_optimizer.optimizer.tgrl_v2.observation import (
 )
 from codesign_optimizer.optimizer.tgrl_v2.ppo import PPOConfig, PPOTransition, attach_gae, ppo_update
 from codesign_optimizer.optimizer.tgrl_v2.trainer import TGRLPPOConfig, TGRLPPOTrainer, _write_svg_lines
-from codesign_optimizer.optimizer.workload_suite import WorkloadSuite
+from codesign_optimizer.optimizer.workload_suite import (
+    WorkloadRunFeedback,
+    WorkloadSuite,
+    WorkloadSuiteBaseline,
+    aggregate_multi_workload_feedback,
+)
 
 
 class FakePipeline:
@@ -186,6 +192,56 @@ def _observation():
     )
 
 
+def _feedback_with_makespan(makespan: float, *, workload: str) -> ParsedPipelineFeedback:
+    summary = {
+        "case_name": "fake",
+        "success": True,
+        "inputs": {"workload": workload},
+        "simulator": {"finished_count": 1, "expected_finished_count": 1},
+    }
+    stdout = f"""
+    [x] [statistics] [info] sys[0], Wall time: {makespan}
+    [x] [statistics] [info] sys[0], Average compute utilization: 90.000%
+    [x] [network] [info] Network top congested link rank=1 id=rack0_sw0_to_rack1_sw0 src_device=0 dst_device=1 level=L4 domain=cluster:cluster0 stats_domain=cluster:cluster0 technology=optical route_class= bytes=4096 busy_time_ns=80 queue_delay_ns=900000 transmissions=2 max_queue_depth=3 utilization=0.800000
+    """
+    return parse_pipeline_feedback(summary=summary, simulator_stdout=stdout)
+
+
+def _suite_feedback(*, speedup_a: float, speedup_b: float):
+    suite = WorkloadSuite.model_validate(
+        {
+            "name": "mixed",
+            "workloads": [
+                {"name": "a", "path": "a.json", "weight": 0.5},
+                {"name": "b", "path": "b.json", "weight": 0.5},
+            ],
+        }
+    )
+    baseline = WorkloadSuiteBaseline(suite_name="mixed", makespans_us={"a": 1000.0, "b": 1000.0})
+    return aggregate_multi_workload_feedback(
+        suite,
+        [
+            WorkloadRunFeedback(
+                name="a",
+                path=Path("a.json"),
+                weight=0.5,
+                out_dir=Path("/tmp/a"),
+                feedback=_feedback_with_makespan(int(round(1000.0 / speedup_a)), workload="a"),
+                speedup=speedup_a,
+            ),
+            WorkloadRunFeedback(
+                name="b",
+                path=Path("b.json"),
+                weight=0.5,
+                out_dir=Path("/tmp/b"),
+                feedback=_feedback_with_makespan(int(round(1000.0 / speedup_b)), workload="b"),
+                speedup=speedup_b,
+            ),
+        ],
+        baseline,
+    )
+
+
 def test_observation_builder_shapes() -> None:
     observation = _observation()
 
@@ -196,6 +252,50 @@ def test_observation_builder_shapes() -> None:
     assert len(observation.action_features[0]) == ACTION_FEATURE_DIM
     assert len(observation.action_features) == len(observation.masked_actions)
     assert any(action.action.action_type == "activate_optional_rack" for action in observation.masked_actions)
+
+
+def test_tgrl_v2_reward_uses_workload_normalized_log_improvement(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    trainer = TGRLPPOTrainer(
+        component_library=_library(),
+        search_space=_space(),
+        pipeline_client=FakePipeline(delay_s=0.0),
+        workload_path=workload,
+        out_dir=tmp_path / "reward",
+        updates=1,
+        rollout_steps=1,
+        env_count=1,
+        config=TGRLPPOConfig(
+            best_improvement_bonus=0.0,
+            duplicate_penalty=0.0,
+            device="cpu",
+        ),
+    )
+
+    baseline = _suite_feedback(speedup_a=1.0, speedup_b=1.0)
+    improved = _suite_feedback(speedup_a=2.0, speedup_b=1.0)
+    worsened = _suite_feedback(speedup_a=0.5, speedup_b=1.0)
+
+    reward = trainer._reward(
+        previous_score=1.0,
+        new_score=0.9,
+        feasible=True,
+        signature="improved",
+        previous_suite_feedback=baseline,
+        new_suite_feedback=improved,
+    )
+    negative_reward = trainer._reward(
+        previous_score=1.0,
+        new_score=1.1,
+        feasible=True,
+        signature="worsened",
+        previous_suite_feedback=baseline,
+        new_suite_feedback=worsened,
+    )
+
+    assert pytest.approx(reward) == math.log(improved.geomean_speedup / baseline.geomean_speedup)
+    assert pytest.approx(negative_reward) == math.log(worsened.geomean_speedup / baseline.geomean_speedup)
 
 
 def test_model_forward_distribution_and_ppo_update() -> None:

@@ -336,6 +336,61 @@ def test_freeze_topology_masks_topology_changing_actions() -> None:
     assert all(item.action.target in {"GPU_SMALL", "CPU"} for item in masked)
 
 
+def test_exhaustive_space_bounds_default_tgrl_actions() -> None:
+    library = _library()
+    space_payload = _space().model_dump(mode="json")
+    space_payload["templates"][0]["racks"] = space_payload["templates"][0]["racks"][:1]
+    space_payload["rack_archetypes"] = []
+    space_payload["exhaustive"] = {
+        "slot_options": [
+            {"node_type": "GPU_SMALL", "link_type": "FAST", "link_qty": 1},
+            {"node_type": "CPU", "link_type": "CXL", "link_qty": 1},
+        ],
+        "allow_empty_slots": False,
+        "intra_rack_topologies": ["switch"],
+        "intra_rack_link_types": ["FAST"],
+        "intra_rack_link_qty": [1],
+        "inter_rack_topologies": ["ring"],
+        "inter_rack_link_types": ["OPTICAL"],
+        "inter_rack_link_qty": [1],
+    }
+    space = SearchSpace.model_validate(space_payload)
+    chromosome = chromosome_from_template(space.templates[0])
+    repairer = CandidateRepairer(library, space)
+    masked = build_masked_actions(
+        chromosome,
+        component_library=library,
+        search_space=space,
+        repairer=repairer,
+        exporter=HardwareTopologyExporter(library),
+        feedback=_feedback(compute=0.95),
+        current_repair=repairer.repair_and_validate(chromosome),
+        policy=None,
+        config=TGRLConfig(temperature=1.0),
+    )
+
+    assert masked
+    assert not any(item.action.action_type == "remove_node_from_slot" for item in masked)
+    assert not any(
+        item.action.action_type
+        in {
+            "change_intra_rack_topology",
+            "upgrade_intra_rack_link",
+            "downgrade_intra_rack_link",
+            "change_inter_rack_topology",
+            "upgrade_inter_rack_link",
+            "downgrade_inter_rack_link",
+        }
+        for item in masked
+    )
+    assert all(
+        item.action.target in {"GPU_SMALL", "CPU"}
+        for item in masked
+        if item.action.action_type in {"add_node_to_slot", "replace_node_type", "upgrade_node", "downgrade_node"}
+    )
+    assert not any(item.action.target == "GPU_FAST" for item in masked)
+
+
 def test_node_replacement_applies_exhaustive_link_option() -> None:
     library = _library()
     space_payload = _space().model_dump(mode="json")
@@ -364,6 +419,37 @@ def test_node_replacement_applies_exhaustive_link_option() -> None:
 
     assert updated.racks[0].slots[0].node_type == "GPU_FAST"
     assert updated.racks[0].slots[0].link_type == "FAST"
+
+
+def test_add_node_applies_exhaustive_link_option() -> None:
+    space_payload = _space().model_dump(mode="json")
+    rack = space_payload["templates"][0]["racks"][0]
+    rack["slots"][2]["node_type"] = None
+    rack["slots"][2]["link_type"] = None
+    rack["slots"][2]["link_qty"] = None
+    space_payload["exhaustive"] = {
+        "slot_options": [
+            {"node_type": "GPU_SMALL", "link_type": "FAST", "link_qty": 1},
+            {"node_type": "CPU", "link_type": "CXL", "link_qty": 1},
+        ]
+    }
+    space = SearchSpace.model_validate(space_payload)
+    chromosome = chromosome_from_template(space.templates[0])
+
+    updated = apply_graph_edit_action(
+        chromosome,
+        GraphEditAction(
+            "add_node_to_slot",
+            rack_id="rack0",
+            resource="slot2",
+            target="CPU",
+        ),
+        search_space=space,
+    )
+
+    assert updated.racks[0].slots[2].node_type == "CPU"
+    assert updated.racks[0].slots[2].link_type == "CXL"
+    assert updated.racks[0].slots[2].link_qty == 1
 
 
 def test_link_actions_respect_rack_hierarchy_scopes() -> None:
