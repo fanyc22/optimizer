@@ -136,6 +136,7 @@ class ExhaustiveSearchRunner:
                     for option in self._space.exhaustive.slot_options
                 ],
                 "allow_empty_slots": self._allow_empty_slots,
+                "delete_empty_racks": True,
                 "min_occupied_slots": self._min_occupied_slots,
                 "max_candidates": cap,
                 "freeze_topology": self._freeze_topology,
@@ -476,12 +477,25 @@ def iter_exhaustive_chromosomes(
             chromosome.inter_rack = inter_topology
             chromosome.inter_rack_link_type = inter_link_type
             chromosome.inter_rack_link_qty = inter_qty
+            _drop_empty_racks(chromosome)
             signature = chromosome.signature()
             if signature in seen:
                 continue
             seen.add(signature)
             result.append(chromosome)
     return result
+
+
+def _drop_empty_racks(chromosome: Chromosome) -> None:
+    chromosome.racks = [rack for rack in chromosome.racks if not _rack_is_empty(rack)]
+    if len(chromosome.racks) <= 1:
+        chromosome.inter_rack = "none"
+        chromosome.inter_rack_link_type = None
+        chromosome.inter_rack_link_qty = 1
+
+
+def _rack_is_empty(rack: RackGene) -> bool:
+    return not rack.occupied_slots and rack.memory_pool_count == 0
 
 
 def _rack_variants(

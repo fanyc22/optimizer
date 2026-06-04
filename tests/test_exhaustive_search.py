@@ -330,6 +330,41 @@ def test_exhaustive_runner_outputs_feasible_candidates_under_rack_cost_limit(tmp
     assert feasible_summary["feasible_evaluations"] == 1
 
 
+def test_exhaustive_deletes_empty_racks_and_evaluates_if_rack_limits_allow(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    space = _space().model_copy(deep=True)
+    space.limits.min_compute_racks = 1
+    pipeline = TopologyAwarePipeline()
+    runner = ExhaustiveSearchRunner(
+        component_library=_library(),
+        search_space=space,
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=tmp_path / "exhaustive",
+        concurrency=2,
+    )
+
+    result = runner.run()
+
+    feasible_rack_counts = {len(evaluation.chromosome.racks) for evaluation in result.feasible_candidates}
+    one_rack_candidates = [
+        evaluation
+        for evaluation in result.feasible_candidates
+        if len(evaluation.chromosome.racks) == 1
+    ]
+    assert result.total_candidates == 9
+    assert result.unique_candidates == 9
+    assert len(result.feasible_candidates) == 8
+    assert pipeline.calls == 8
+    assert feasible_rack_counts == {1, 2}
+    assert one_rack_candidates
+    assert all(evaluation.chromosome.inter_rack == "none" for evaluation in one_rack_candidates)
+    assert any(not evaluation.chromosome.racks for evaluation in result.history)
+    enumeration = json.loads((tmp_path / "exhaustive" / "enumeration.json").read_text(encoding="utf-8"))
+    assert enumeration["delete_empty_racks"] is True
+
+
 def test_exhaustive_can_enumerate_empty_slots_under_min_occupancy(tmp_path: Path) -> None:
     workload = tmp_path / "workload.json"
     workload.write_text("{}", encoding="utf-8")
