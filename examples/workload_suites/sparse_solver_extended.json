@@ -1,7 +1,7 @@
 {
   "name": "sparse_solver",
   "metric": "makespan",
-  "workload_concurrency": 1,
+  "workload_concurrency": 6,
   "workloads": [
     {
         "name": "ASIC_100ks",

@@ -169,7 +169,6 @@ def test_exporter_supports_explicit_heterogeneous_racks() -> None:
 
 def test_exporter_emits_intra_rack_topology_modes() -> None:
     expected_counts = {
-        "none": 0,
         "ring": 3,
         "fully_connected": 3,
         "switch": 3,
@@ -208,7 +207,6 @@ def test_exporter_emits_intra_rack_topology_modes() -> None:
 
 def test_exporter_emits_inter_rack_topology_modes() -> None:
     expected_counts = {
-        "none": 0,
         "ring": 3,
         "fully_connected": 3,
     }
@@ -232,7 +230,7 @@ def test_exporter_emits_inter_rack_topology_modes() -> None:
                     for idx in range(3)
                 ],
                 "inter_rack": inter_rack,
-                "inter_rack_link_type": "OPTICAL" if inter_rack != "none" else None,
+                "inter_rack_link_type": "OPTICAL",
                 "inter_rack_link_qty": 2,
             }
         )
@@ -242,6 +240,63 @@ def test_exporter_emits_inter_rack_topology_modes() -> None:
 
         assert len(rack_links) == expected_count
         assert all(link["bandwidth_gbps"] == 200 for link in rack_links)
+
+
+def test_exporter_rejects_disconnected_none_topologies() -> None:
+    intra_none_template = RackTemplate.model_validate(
+        {
+            "name": "bad_intra_none",
+            "racks": [
+                {
+                    "rack_id": "rack0",
+                    "role": "compute",
+                    "max_slots": 2,
+                    "slots": [
+                        {"slot_id": "slot0", "node_type": "GPU"},
+                        {"slot_id": "slot1", "node_type": "GPU"},
+                    ],
+                    "switch_count": 0,
+                    "intra_rack_topology": "none",
+                    "intra_rack_link_type": "FAST",
+                    "limits": {"max_slots": 2, "max_memory_pool_count": 0, "max_switch_count": 1},
+                }
+            ],
+            "inter_rack": "none",
+        }
+    )
+    intra_none = chromosome_from_template(intra_none_template)
+    intra_none.racks[0].intra_rack_topology = "none"
+    with pytest.raises(ValueError, match="intra_rack_topology=none"):
+        HardwareTopologyExporter(_library()).export(intra_none)
+
+    inter_none_template = RackTemplate.model_validate(
+        {
+            "name": "bad_inter_none",
+            "racks": [
+                {
+                    "rack_id": f"rack{idx}",
+                    "role": "compute",
+                    "max_slots": 1,
+                    "slots": [{"slot_id": "slot0", "node_type": "GPU"}],
+                    "switch_count": 1,
+                    "switch_type": "SW",
+                    "intra_rack_topology": "switch",
+                    "intra_rack_link_type": "FAST",
+                    "limits": {"max_slots": 1, "max_memory_pool_count": 0, "max_switch_count": 1},
+                }
+                for idx in range(2)
+            ],
+            "inter_rack": "none",
+        }
+    )
+    missing_link_type = chromosome_from_template(inter_none_template)
+    with pytest.raises(ValueError, match="has no link_type"):
+        HardwareTopologyExporter(_library()).export(missing_link_type)
+
+    inter_none = chromosome_from_template(inter_none_template)
+    inter_none.inter_rack = "none"
+    with pytest.raises(ValueError, match="inter_rack topology=none"):
+        HardwareTopologyExporter(_library()).export(inter_none)
 
 
 def test_exporter_rejects_lower_level_link_for_inter_rack_scope() -> None:

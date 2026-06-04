@@ -318,7 +318,10 @@ class TCROSearchRunner:
             base_chromosome=base.to_dict(),
             racks=racks,
             inter_rack_alpha=float(base.inter_rack_link_qty),
-            inter_rack_mode_logits=_initial_logits(["none", "ring", "fully_connected"], base.inter_rack),
+            inter_rack_mode_logits=_initial_logits(
+                ["ring", "fully_connected"],
+                "ring" if base.inter_rack == "none" else base.inter_rack,
+            ),
             inter_rack_link_type_logits=_initial_logits(
                 inter_links,
                 _scoped_link_preferred(self._library, base.inter_rack_link_type, "inter"),
@@ -373,8 +376,8 @@ class TCROSearchRunner:
             maximum=self._space.mutation.max_inter_rack_link_qty,
         )
         if inter_qty <= 0:
-            chromosome.inter_rack = "none"
-            chromosome.inter_rack_link_qty = 1
+            chromosome.inter_rack = "ring"
+            chromosome.inter_rack_link_qty = self._space.mutation.min_inter_rack_link_qty
         else:
             chromosome.inter_rack = _select_from_logits(
                 state.inter_rack_mode_logits,

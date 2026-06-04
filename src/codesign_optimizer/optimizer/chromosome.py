@@ -284,12 +284,14 @@ def infer_type_pools(space: SearchSpace, node_types: dict[str, Any], link_types:
 
 
 def chromosome_from_template(template: RackTemplate) -> Chromosome:
-    return Chromosome(
-        template_name=template.name,
-        racks=[_rack_gene_from_spec(rack, dynamic=False) for rack in template.racks],
-        inter_rack=template.inter_rack,
-        inter_rack_link_type=template.inter_rack_link_type,
-        inter_rack_link_qty=template.inter_rack_link_qty,
+    return _sanitize_topologies(
+        Chromosome(
+            template_name=template.name,
+            racks=[_rack_gene_from_spec(rack, dynamic=False) for rack in template.racks],
+            inter_rack=template.inter_rack,
+            inter_rack_link_type=template.inter_rack_link_type,
+            inter_rack_link_qty=template.inter_rack_link_qty,
+        )
     )
 
 
@@ -298,7 +300,28 @@ def rack_gene_from_archetype(archetype: RackArchetype, rack_id: str) -> RackGene
     rack.optional = False
     rack.active = True
     rack.origin = "dynamic"
+    _sanitize_rack_topology(rack)
     return rack
+
+
+def _sanitize_topologies(chromosome: Chromosome) -> Chromosome:
+    if chromosome.inter_rack == "none":
+        chromosome.inter_rack = "ring"
+    for rack in chromosome.racks:
+        _sanitize_rack_topology(rack)
+    return chromosome
+
+
+def _sanitize_rack_topology(rack: RackGene) -> None:
+    if rack.intra_rack_topology != "none":
+        return
+    max_switches = rack.limits.max_switch_count
+    if rack.switch_type and (max_switches is None or max_switches > 0):
+        rack.intra_rack_topology = "switch"
+        if rack.switch_count <= 0:
+            rack.switch_count = 1
+    else:
+        rack.intra_rack_topology = "ring"
 
 
 def initial_population(space: SearchSpace, population_size: int, rng: random.Random) -> list[Chromosome]:
@@ -364,19 +387,19 @@ def mutate_random(
                 rng,
             )
         elif op == "intra_mode":
-            rack.intra_rack_topology = rng.choice(["none", "ring", "fully_connected", "switch"])
+            rack.intra_rack_topology = rng.choice(["ring", "fully_connected", "switch"])
             if rack.intra_rack_topology == "switch" and rack.switch_count <= 0:
                 rack.switch_count = 1
         elif op == "inter_mode":
-            result.inter_rack = rng.choice(["none", "ring", "fully_connected"])
+            result.inter_rack = rng.choice(["ring", "fully_connected"])
         elif op == "remove_rack":
             result.racks = [item for item in result.racks if item.rack_id != rack.rack_id]
-    return result
+    return _sanitize_topologies(result)
 
 
 def crossover(left: Chromosome, right: Chromosome, rng: random.Random) -> Chromosome:
     if not left.racks or not right.racks:
-        return left.model_copy(deep=True)
+        return _sanitize_topologies(left.model_copy(deep=True))
     child = left.model_copy(deep=True)
     for idx, rack in enumerate(child.racks):
         donor = _matching_rack(rack, right.racks, idx)
@@ -386,7 +409,7 @@ def crossover(left: Chromosome, right: Chromosome, rng: random.Random) -> Chromo
         child.inter_rack = right.inter_rack
         child.inter_rack_link_type = right.inter_rack_link_type
         child.inter_rack_link_qty = right.inter_rack_link_qty
-    return child
+    return _sanitize_topologies(child)
 
 
 def _rack_gene_from_spec(rack: RackSpec, *, dynamic: bool) -> RackGene:

@@ -473,6 +473,21 @@ def test_link_actions_respect_rack_hierarchy_scopes() -> None:
     assert "CXL" not in inter_targets
 
 
+def test_graph_edit_actions_never_offer_none_topology() -> None:
+    library = _library()
+    space = _space()
+    chromosome = chromosome_from_template(space.templates[0])
+    actions = enumerate_graph_edit_actions(chromosome, component_library=library, search_space=space)
+
+    topology_targets = {
+        action.target
+        for action in actions
+        if action.action_type in {"change_intra_rack_topology", "change_inter_rack_topology"}
+    }
+
+    assert "none" not in topology_targets
+
+
 def test_slot_replace_and_upgrade_actions_apply_to_nodes() -> None:
     library = _library()
     space = _space()

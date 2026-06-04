@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from codesign_optimizer.models.hardware import ComponentLibrary
 from codesign_optimizer.optimizer.chromosome import Chromosome, RackGene, role_of_type
 from codesign_optimizer.optimizer.exporter import HardwareTopologyExporter, node_role
+from codesign_optimizer.optimizer.link_scope import link_type_allowed_for_scope, ordered_link_types_for_scope
 from codesign_optimizer.optimizer.search_space import SearchLimits, SearchSpace
 
 
@@ -47,6 +48,7 @@ class CandidateRepairer:
             )
         for rack in repaired.racks:
             self._repair_rack(rack, messages)
+        self._repair_cluster_topology(repaired, messages)
 
         feasible = True
         penalty = 0.0
@@ -98,6 +100,12 @@ class CandidateRepairer:
             penalty=penalty,
             messages=messages,
         )
+        feasible, penalty = self._check_topology_connectivity(
+            exported.hardware_topology,
+            feasible=feasible,
+            penalty=penalty,
+            messages=messages,
+        )
         return RepairReport(
             chromosome=repaired,
             feasible=feasible,
@@ -133,12 +141,68 @@ class CandidateRepairer:
                 )
         if rack.limits.max_switch_count is not None:
             rack.switch_count = min(rack.switch_count, rack.limits.max_switch_count)
-        if rack.intra_rack_topology == "switch" and rack.switch_count <= 0:
+        max_switches = rack.limits.max_switch_count
+        if (
+            rack.intra_rack_topology == "switch"
+            and rack.switch_count <= 0
+            and (max_switches is None or max_switches > 0)
+        ):
             rack.switch_count = 1
         if rack.limits.max_memory_pool_count is not None:
             rack.memory_pool_count = min(rack.memory_pool_count, rack.limits.max_memory_pool_count)
+        self._repair_rack_topology(rack)
         if rack.model_dump() != original.model_dump():
             messages.append(f"repaired rack bounds for {rack.rack_id}")
+
+    def _repair_rack_topology(self, rack: RackGene) -> None:
+        endpoint_count = len(rack.occupied_slots) + rack.memory_pool_count
+        if endpoint_count > 0 and rack.intra_rack_topology == "none":
+            rack.intra_rack_topology = self._fallback_intra_rack_topology(rack)
+        if rack.intra_rack_topology == "switch":
+            max_switches = rack.limits.max_switch_count
+            if rack.switch_count <= 0 and (max_switches is None or max_switches > 0):
+                rack.switch_count = 1
+            if rack.switch_count <= 0:
+                rack.intra_rack_topology = "ring"
+        if endpoint_count > 0 and rack.intra_rack_topology in {"ring", "fully_connected", "switch"}:
+            if rack.intra_rack_link_type is None or not link_type_allowed_for_scope(self._library, rack.intra_rack_link_type, "intra"):
+                fallback = self._fallback_link_type("intra")
+                if fallback is not None:
+                    rack.intra_rack_link_type = fallback
+        if rack.memory_pool_count > 0:
+            memory_link_type = rack.memory_link_type or rack.intra_rack_link_type
+            if memory_link_type is None or not link_type_allowed_for_scope(self._library, memory_link_type, "intra"):
+                fallback = self._fallback_link_type("intra")
+                if fallback is not None:
+                    rack.memory_link_type = fallback
+
+    def _repair_cluster_topology(self, chromosome: Chromosome, messages: list[str]) -> None:
+        original = chromosome.model_dump()
+        active_racks = [rack for rack in chromosome.racks if rack.active or not rack.optional]
+        chromosome.inter_rack_link_qty = max(
+            self._space.mutation.min_inter_rack_link_qty,
+            min(self._space.mutation.max_inter_rack_link_qty, chromosome.inter_rack_link_qty),
+        )
+        if active_racks and chromosome.inter_rack == "none":
+            chromosome.inter_rack = "ring"
+        if len(active_racks) > 1 and chromosome.inter_rack not in {"ring", "fully_connected"}:
+            chromosome.inter_rack = "ring"
+        if len(active_racks) > 1 and (chromosome.inter_rack_link_type is None or not link_type_allowed_for_scope(self._library, chromosome.inter_rack_link_type, "inter")):
+            fallback = self._fallback_link_type("inter")
+            if fallback is not None:
+                chromosome.inter_rack_link_type = fallback
+        if chromosome.model_dump() != original:
+            messages.append("repaired inter-rack topology for connectivity")
+
+    def _fallback_intra_rack_topology(self, rack: RackGene) -> str:
+        max_switches = rack.limits.max_switch_count
+        if rack.switch_type and (max_switches is None or max_switches > 0):
+            return "switch"
+        return "ring"
+
+    def _fallback_link_type(self, scope: str) -> str | None:
+        choices = ordered_link_types_for_scope(self._library, scope)
+        return choices[0] if choices else None
 
     def _check_limits(
         self,
@@ -421,6 +485,55 @@ class CandidateRepairer:
                 messages.append(
                     f"{rack.rack_id} switch radix exceeded: {per_switch:.3f} > {radix}"
                 )
+        return feasible, penalty
+
+    def _check_topology_connectivity(
+        self,
+        hardware_topology: dict,
+        *,
+        feasible: bool,
+        penalty: float,
+        messages: list[str],
+    ) -> tuple[bool, float]:
+        endpoint_ids = [
+            str(node.get("id"))
+            for node in hardware_topology.get("nodes", [])
+            if node.get("role") in {"rank_compute", "memory_pool"}
+        ]
+        if len(endpoint_ids) <= 1:
+            return feasible, penalty
+
+        adjacency: dict[str, set[str]] = {}
+        for node in hardware_topology.get("nodes", []):
+            node_id = str(node.get("id"))
+            adjacency.setdefault(node_id, set())
+        for link in hardware_topology.get("links", []):
+            src = str(link.get("src"))
+            dst = str(link.get("dst"))
+            if not src or not dst:
+                continue
+            adjacency.setdefault(src, set()).add(dst)
+            adjacency.setdefault(dst, set())
+            if bool(link.get("bidirectional", False)):
+                adjacency[dst].add(src)
+
+        seen: set[str] = set()
+        stack = [endpoint_ids[0]]
+        while stack:
+            current = stack.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            stack.extend(sorted(adjacency.get(current, set()) - seen))
+
+        missing = [node_id for node_id in endpoint_ids if node_id not in seen]
+        if missing:
+            feasible = False
+            penalty += len(missing) * 100_000.0
+            preview = ", ".join(missing[:4])
+            if len(missing) > 4:
+                preview += ", ..."
+            messages.append(f"hardware topology is disconnected; unreachable endpoints: {preview}")
         return feasible, penalty
 
     def _link_lanes(self, link_type: str | None) -> int:

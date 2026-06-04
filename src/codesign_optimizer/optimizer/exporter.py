@@ -296,6 +296,9 @@ class HardwareTopologyExporter:
         proposal_links: list[InstantiatedLink],
     ) -> None:
         if rack.intra_rack_topology == "none":
+            rack_nodes = compute_ids + memory_ids
+            if rack_nodes:
+                raise ValueError(f"rack {rack.rack_id} has disallowed intra_rack_topology=none")
             return
         if rack.intra_rack_topology == "switch":
             if not switch_ids:
@@ -363,11 +366,13 @@ class HardwareTopologyExporter:
         links: list[dict[str, Any]],
         proposal_links: list[InstantiatedLink],
     ) -> None:
-        if chromosome.inter_rack == "none" or len(rack_gateways) <= 1:
+        if len(rack_gateways) <= 1:
             return
+        if chromosome.inter_rack == "none":
+            raise ValueError("inter_rack topology=none disconnects active racks")
         link_type = chromosome.inter_rack_link_type
         if link_type is None:
-            return
+            raise ValueError(f"inter_rack topology={chromosome.inter_rack} has no link_type")
 
         if chromosome.inter_rack == "ring":
             pairs = (

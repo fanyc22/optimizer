@@ -874,7 +874,7 @@ def enumerate_graph_edit_actions(
                             target=target,
                         )
                     )
-        for mode in ("none", "ring", "fully_connected", "switch"):
+        for mode in ("ring", "fully_connected", "switch"):
             if mode != rack.intra_rack_topology:
                 actions.append(GraphEditAction("change_intra_rack_topology", rack_id=rack.rack_id, target=mode))
         for action_type, direction in [
@@ -896,7 +896,7 @@ def enumerate_graph_edit_actions(
         target = _adjacent_link_type(chromosome.inter_rack_link_type, inter_link_order, direction=direction)
         if target:
             actions.append(GraphEditAction(action_type, target=target))
-    for mode in ("none", "ring", "fully_connected"):
+    for mode in ("ring", "fully_connected"):
         if mode != chromosome.inter_rack:
             actions.append(GraphEditAction("change_inter_rack_topology", target=mode))
     return _unique_actions(actions)
@@ -1098,7 +1098,7 @@ def apply_graph_edit_action(
                 _apply_exhaustive_slot_link_option(slot, action.target, search_space)
         return result
     if action.action_type == "change_intra_rack_topology" and rack is not None:
-        rack.intra_rack_topology = action.target
+        rack.intra_rack_topology = "switch" if action.target == "none" else action.target
         if rack.intra_rack_topology == "switch" and rack.switch_count <= 0:
             rack.switch_count = 1
         return result
@@ -1117,7 +1117,7 @@ def apply_graph_edit_action(
                 result.inter_rack = "ring"
         return result
     if action.action_type == "change_inter_rack_topology":
-        result.inter_rack = action.target
+        result.inter_rack = "ring" if action.target == "none" else action.target
         return result
     return result
 
@@ -1171,8 +1171,6 @@ def heuristic_action_score(
             score += max(0.0, network_pressure) * 3.0
         elif action.target == "ring":
             score += 0.5 + context.constraint_pressure * 0.3
-        elif action.target == "none":
-            score += context.constraint_pressure * 2.0
     elif action.action_type == "activate_optional_rack" and rack is not None:
         if rack.role in {"compute", "hybrid"}:
             score += max(0.0, context.compute_utilization - 0.75) * 4.0

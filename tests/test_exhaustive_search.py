@@ -159,7 +159,8 @@ def _variable_occupancy_space() -> SearchSpace:
                             },
                         }
                     ],
-                    "inter_rack": "none",
+                    "inter_rack": "ring",
+                    "inter_rack_link_type": "OPTICAL",
                 }
             ],
             "exhaustive": {
@@ -169,7 +170,9 @@ def _variable_occupancy_space() -> SearchSpace:
                 "intra_rack_topologies": ["switch"],
                 "intra_rack_link_types": ["FAST"],
                 "intra_rack_link_qty": [1],
-                "inter_rack_topologies": ["none"],
+                "inter_rack_topologies": ["ring"],
+                "inter_rack_link_types": ["OPTICAL"],
+                "inter_rack_link_qty": [1],
             },
             "limits": {
                 "max_total_cost": 200000,
@@ -192,8 +195,8 @@ def test_exhaustive_enumeration_counts_example_space() -> None:
         ("search_space_3rack_exhaustive_tiny.json", 3, 2, 64),
         ("search_space_4rack_exhaustive_tiny.json", 4, 2, 256),
         ("search_space_5rack_exhaustive_tiny.json", 5, 2, 1024),
-        ("search_space_1rack_4device_exhaustive_topology.json", 1, 4, 64),
-        ("search_space_2rack_4device_exhaustive_topology.json", 2, 4, 12288),
+        ("search_space_1rack_4device_exhaustive_topology.json", 1, 4, 48),
+        ("search_space_2rack_4device_exhaustive_topology.json", 2, 4, 4608),
     ]
     for filename, rack_count, slots_per_rack, candidate_count in examples:
         space = SearchSpace.model_validate(load_jsonc(optimizer_root / "examples" / filename))
@@ -209,6 +212,12 @@ def test_exhaustive_enumeration_counts_example_space() -> None:
             else iter_exhaustive_chromosomes(space, freeze_topology=True, allow_empty_slots=False)
         )
         assert len(chromosomes) == (candidate_count if candidate_count <= 1024 else 256)
+        assert all(chromosome.inter_rack != "none" for chromosome in chromosomes)
+        assert all(
+            rack.intra_rack_topology != "none"
+            for chromosome in chromosomes
+            for rack in chromosome.racks
+        )
         assert all(
             slot.link_type == ("GPU_FABRIC_200G" if slot.node_type == "GPU_BALANCED_80TF_80GB" else "CPU_PCIE_128G")
             for chromosome in chromosomes
@@ -220,8 +229,8 @@ def test_exhaustive_enumeration_counts_example_space() -> None:
 def test_exhaustive_freeze_topology_reduces_topology_examples() -> None:
     optimizer_root = Path(__file__).resolve().parents[1]
     examples = [
-        ("search_space_1rack_4device_exhaustive_topology.json", 64, 16),
-        ("search_space_2rack_4device_exhaustive_topology.json", 12288, 256),
+        ("search_space_1rack_4device_exhaustive_topology.json", 48, 16),
+        ("search_space_2rack_4device_exhaustive_topology.json", 4608, 256),
     ]
     for filename, unfrozen_count, frozen_count in examples:
         space = SearchSpace.model_validate(load_jsonc(optimizer_root / "examples" / filename))

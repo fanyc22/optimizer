@@ -408,12 +408,28 @@ def count_exhaustive_candidates(
                 )
             count *= (
                 slot_count
-                * len(_choices(space.exhaustive.intra_rack_topologies, rack.intra_rack_topology, freeze_topology))
+                * len(
+                    _topology_choices(
+                        space.exhaustive.intra_rack_topologies,
+                        rack.intra_rack_topology,
+                        freeze_topology,
+                        default="switch",
+                        allowed={"ring", "fully_connected", "switch"},
+                    )
+                )
                 * len(_choices(space.exhaustive.intra_rack_link_types, rack.intra_rack_link_type, freeze_topology))
                 * len(_choices(space.exhaustive.intra_rack_link_qty, rack.intra_rack_link_qty, freeze_topology))
             )
         count *= (
-            len(_choices(space.exhaustive.inter_rack_topologies, template.inter_rack, freeze_topology))
+            len(
+                _topology_choices(
+                    space.exhaustive.inter_rack_topologies,
+                    template.inter_rack,
+                    freeze_topology,
+                    default="ring",
+                    allowed={"ring", "fully_connected"},
+                )
+            )
             * len(_choices(space.exhaustive.inter_rack_link_types, template.inter_rack_link_type, freeze_topology))
             * len(_choices(space.exhaustive.inter_rack_link_qty, template.inter_rack_link_qty, freeze_topology))
         )
@@ -440,7 +456,13 @@ def iter_exhaustive_chromosomes(
             )
             for rack in base.racks
         ]
-        inter_topologies = _choices(space.exhaustive.inter_rack_topologies, base.inter_rack, freeze_topology)
+        inter_topologies = _topology_choices(
+            space.exhaustive.inter_rack_topologies,
+            base.inter_rack,
+            freeze_topology,
+            default="ring",
+            allowed={"ring", "fully_connected"},
+        )
         inter_link_types = _choices(space.exhaustive.inter_rack_link_types, base.inter_rack_link_type, freeze_topology)
         inter_link_qty = _choices(space.exhaustive.inter_rack_link_qty, base.inter_rack_link_qty, freeze_topology)
         for rack_combo, inter_topology, inter_link_type, inter_qty in itertools.product(
@@ -473,7 +495,13 @@ def _rack_variants(
         _slot_options_for_slot(slot, space, allow_empty_slots=allow_empty_slots)
         for slot in rack.slots
     ]
-    intra_topologies = _choices(space.exhaustive.intra_rack_topologies, rack.intra_rack_topology, freeze_topology)
+    intra_topologies = _topology_choices(
+        space.exhaustive.intra_rack_topologies,
+        rack.intra_rack_topology,
+        freeze_topology,
+        default="switch",
+        allowed={"ring", "fully_connected", "switch"},
+    )
     intra_link_types = _choices(space.exhaustive.intra_rack_link_types, rack.intra_rack_link_type, freeze_topology)
     intra_link_qty = _choices(space.exhaustive.intra_rack_link_qty, rack.intra_rack_link_qty, freeze_topology)
     variants: list[RackGene] = []
@@ -547,6 +575,21 @@ def _choices(values: list[Any] | None, fallback: Any, freeze_topology: bool = Fa
     if values is None:
         return [fallback]
     return list(values)
+
+
+def _topology_choices(
+    values: list[Any] | None,
+    fallback: Any,
+    freeze_topology: bool,
+    *,
+    default: str,
+    allowed: set[str],
+) -> list[Any]:
+    choices = _choices(values, fallback, freeze_topology)
+    filtered = [choice for choice in choices if choice in allowed]
+    if filtered:
+        return filtered
+    return [fallback if fallback in allowed else default]
 
 
 def _feedback_to_dict(feedback: ParsedPipelineFeedback) -> dict[str, Any]:

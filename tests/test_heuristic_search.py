@@ -8,6 +8,7 @@ import pytest
 from codesign_optimizer.models.hardware import ComponentLibrary
 from codesign_optimizer.optimizer.chromosome import chromosome_from_template, mutate_random
 from codesign_optimizer.optimizer.evolutionary import HeuristicSearchRunner
+from codesign_optimizer.optimizer.exporter import HardwareTopologyExporter
 from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback, parse_pipeline_feedback
 from codesign_optimizer.optimizer.repair import CandidateRepairer
 from codesign_optimizer.optimizer.search_space import SearchSpace
@@ -368,6 +369,42 @@ def test_repair_allows_memory_only_rack_without_adding_compute() -> None:
     assert memory_rack.gpu_count == 0
     assert memory_rack.cpu_count == 0
     assert memory_rack.memory_pool_count == 1
+
+
+def test_repair_replaces_none_topologies_and_keeps_hardware_connected() -> None:
+    space = _hetero_space()
+    library = _library()
+    chromosome = chromosome_from_template(space.templates[0])
+    chromosome.inter_rack = "none"
+    for rack in chromosome.racks:
+        rack.intra_rack_topology = "none"
+
+    report = CandidateRepairer(library, space).repair_and_validate(chromosome)
+
+    assert report.feasible
+    assert report.chromosome.inter_rack == "ring"
+    assert all(rack.intra_rack_topology != "none" for rack in report.chromosome.racks)
+    exported = HardwareTopologyExporter(library).export(report.chromosome)
+    endpoints = [
+        node["id"]
+        for node in exported.hardware_topology["nodes"]
+        if node["role"] in {"rank_compute", "memory_pool"}
+    ]
+    adjacency = {node["id"]: set() for node in exported.hardware_topology["nodes"]}
+    for link in exported.hardware_topology["links"]:
+        adjacency[link["src"]].add(link["dst"])
+        if link.get("bidirectional"):
+            adjacency[link["dst"]].add(link["src"])
+    seen = set()
+    stack = [endpoints[0]]
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        stack.extend(adjacency[current] - seen)
+
+    assert set(endpoints) <= seen
 
 
 def test_slots_schema_rejects_legacy_count_template() -> None:
