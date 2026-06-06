@@ -59,6 +59,7 @@ summary = {
         "topology": args.topology,
         "out": args.out,
         "calibration_fit_model": args.calibration_fit_model,
+        "materialized_calibration": args.calibration_fit_model is not None,
     },
     "simulator": {
         "stdout": str(stdout),
@@ -138,6 +139,7 @@ def test_pipeline_client_passes_calibration_fit_model(tmp_path: Path) -> None:
 
     summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
     assert summary["inputs"]["calibration_fit_model"] == str(model.resolve())
+    assert summary["inputs"]["materialized_calibration"] is True
 
 
 def test_pipeline_client_can_pass_llm_evaluation_args(tmp_path: Path) -> None:

@@ -143,9 +143,11 @@ root detected by the optimizer:
 ```
 
 The optimizer passes this to `tools/run_mapper_sim_pipeline.py
---calibration-fit-model`, and the wrapper passes it to simulator as
-`--calibration-fit-model=<abs-path>`. This requires the normal
-`hardware_topology.v2` + congestion-aware analytical simulator path.
+--calibration-fit-model`. The wrapper materializes the model into the generated
+`mapper_hardware.json` and `hardware_topology.json` calibration fields before
+launching simulator, so the simulator command does not include
+`--calibration-fit-model`. This requires the normal `hardware_topology.v2` +
+congestion-aware analytical simulator path.
 
 To optimize for LLM inference, keep using `--workload` as the path argument but
 point it at a supported LLM `config.json` or model directory, and set
