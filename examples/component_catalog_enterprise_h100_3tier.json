@@ -1,0 +1,89 @@
+{
+  "node_types": {
+    "GPU_NVIDIA_H100_SXM5_80GB": {
+      "role": "gpu",
+      "peak_tflops": 1979,
+      "memory_bw_gbps": 3350,
+      "memory_latency_ns": 80,
+      "local_memory_gb": 80,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 700,
+      "cost_unit": 130000,
+      "rack_units": 0
+    },
+    "CPU_XEON_5TH_64C_350W": {
+      "role": "cpu",
+      "peak_tflops": 6,
+      "memory_bw_gbps": 460,
+      "memory_latency_ns": 90,
+      "local_memory_gb": 1024,
+      "slots": 64,
+      "max_parallelism": 64,
+      "comm_slots": 1,
+      "tdp_watts": 350,
+      "cost_unit": 18000,
+      "rack_units": 0
+    },
+    "HGX_H100_8GPU_NVSWITCH_FABRIC": {
+      "role": "switch",
+      "radix": 32,
+      "tdp_watts": 2500,
+      "cost_unit": 120000,
+      "rack_units": 0
+    },
+    "PCIE_CPU_HOST_FABRIC": {
+      "role": "switch",
+      "radix": 16,
+      "tdp_watts": 180,
+      "cost_unit": 9000,
+      "rack_units": 0
+    },
+    "NVIDIA_QM9700_NDR64": {
+      "role": "switch",
+      "radix": 64,
+      "tdp_watts": 747,
+      "cost_unit": 105000,
+      "rack_units": 1
+    }
+  },
+  "link_types": {
+    "HOST_NVLINK4_900GBS": {
+      "bandwidth_gbps": 7200,
+      "latency_ns": 80,
+      "protocol": "NVLink",
+      "technology": "hgx_h100_nvlink_nvswitch",
+      "level": "L2",
+      "lanes": 1,
+      "cost_unit": 600
+    },
+    "HOST_PCIE_GEN5_X16": {
+      "bandwidth_gbps": 512,
+      "latency_ns": 180,
+      "protocol": "PCIe",
+      "technology": "pcie_gen5_x16",
+      "level": "L2",
+      "lanes": 16,
+      "cost_unit": 450
+    },
+    "NDR400_TO_RACK_SWITCH": {
+      "bandwidth_gbps": 400,
+      "latency_ns": 700,
+      "protocol": "InfiniBand",
+      "technology": "connectx7_ndr400_osfp",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 3000
+    },
+    "NDR400_INTER_RACK": {
+      "bandwidth_gbps": 400,
+      "latency_ns": 900,
+      "protocol": "InfiniBand",
+      "technology": "quantum2_ndr400_osfp",
+      "level": "L4",
+      "lanes": 1,
+      "cost_unit": 3000
+    }
+  }
+}

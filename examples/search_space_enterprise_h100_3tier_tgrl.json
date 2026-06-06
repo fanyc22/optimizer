@@ -1,0 +1,156 @@
+{
+  "seed": 20260606,
+  "host_templates": [
+    {
+      "template_id": "xe9680_hgx_h100_8gpu_host",
+      "rack_units": 6,
+      "slots": [
+        {"slot_id": "cpu0", "node_type": "CPU_XEON_5TH_64C_350W"},
+        {"slot_id": "cpu1", "node_type": "CPU_XEON_5TH_64C_350W"},
+        {"slot_id": "gpu0", "node_type": "GPU_NVIDIA_H100_SXM5_80GB"},
+        {"slot_id": "gpu1", "node_type": "GPU_NVIDIA_H100_SXM5_80GB"},
+        {"slot_id": "gpu2", "node_type": "GPU_NVIDIA_H100_SXM5_80GB"},
+        {"slot_id": "gpu3", "node_type": "GPU_NVIDIA_H100_SXM5_80GB"},
+        {"slot_id": "gpu4", "node_type": "GPU_NVIDIA_H100_SXM5_80GB"},
+        {"slot_id": "gpu5", "node_type": "GPU_NVIDIA_H100_SXM5_80GB"},
+        {"slot_id": "gpu6", "node_type": "GPU_NVIDIA_H100_SXM5_80GB"},
+        {"slot_id": "gpu7", "node_type": "GPU_NVIDIA_H100_SXM5_80GB"}
+      ],
+      "host_topology": "switch",
+      "host_switch_type": "HGX_H100_8GPU_NVSWITCH_FABRIC",
+      "host_link_type": "HOST_NVLINK4_900GBS",
+      "host_link_qty": 1,
+      "rack_uplink_link_type": "NDR400_TO_RACK_SWITCH",
+      "rack_uplink_link_qty": 8
+    },
+    {
+      "template_id": "dual_xeon_cpu_2u_host",
+      "rack_units": 2,
+      "slots": [
+        {"slot_id": "cpu0", "node_type": "CPU_XEON_5TH_64C_350W"},
+        {"slot_id": "cpu1", "node_type": "CPU_XEON_5TH_64C_350W"}
+      ],
+      "host_topology": "switch",
+      "host_switch_type": "PCIE_CPU_HOST_FABRIC",
+      "host_link_type": "HOST_PCIE_GEN5_X16",
+      "host_link_qty": 1,
+      "rack_uplink_link_type": "NDR400_TO_RACK_SWITCH",
+      "rack_uplink_link_qty": 2
+    }
+  ],
+  "templates": [
+    {
+      "name": "enterprise_h100_2rack_64gpu",
+      "racks": [
+        {
+          "rack_id": "rack0",
+          "role": "compute",
+          "max_slots": 60,
+          "max_hosts": 6,
+          "hosts": [
+            {"host_id": "host0", "template_id": "xe9680_hgx_h100_8gpu_host"},
+            {"host_id": "host1", "template_id": "xe9680_hgx_h100_8gpu_host"},
+            {"host_id": "host2", "template_id": "xe9680_hgx_h100_8gpu_host"},
+            {"host_id": "host3", "template_id": "xe9680_hgx_h100_8gpu_host"},
+            {"host_id": "host4"},
+            {"host_id": "host5"}
+          ],
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "switch_type": "NVIDIA_QM9700_NDR64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "NDR400_TO_RACK_SWITCH",
+          "intra_rack_link_qty": 8,
+          "limits": {
+            "max_slots": 60,
+            "max_switch_count": 1,
+            "max_rack_units": 42,
+            "max_power_watts": 50000
+          }
+        },
+        {
+          "rack_id": "rack1",
+          "role": "compute",
+          "max_slots": 60,
+          "max_hosts": 6,
+          "hosts": [
+            {"host_id": "host0", "template_id": "xe9680_hgx_h100_8gpu_host"},
+            {"host_id": "host1", "template_id": "xe9680_hgx_h100_8gpu_host"},
+            {"host_id": "host2", "template_id": "xe9680_hgx_h100_8gpu_host"},
+            {"host_id": "host3", "template_id": "xe9680_hgx_h100_8gpu_host"},
+            {"host_id": "host4"},
+            {"host_id": "host5"}
+          ],
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "switch_type": "NVIDIA_QM9700_NDR64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "NDR400_TO_RACK_SWITCH",
+          "intra_rack_link_qty": 8,
+          "limits": {
+            "max_slots": 60,
+            "max_switch_count": 1,
+            "max_rack_units": 42,
+            "max_power_watts": 50000
+          }
+        }
+      ],
+      "inter_rack": "ring",
+      "inter_rack_link_type": "NDR400_INTER_RACK",
+      "inter_rack_link_qty": 8
+    }
+  ],
+  "rack_archetypes": [
+    {
+      "name": "xe9680_h100_compute_rack_4host",
+      "rack_id_prefix": "h100-rack",
+      "role": "compute",
+      "max_slots": 60,
+      "max_hosts": 6,
+      "hosts": [
+        {"host_id": "host0", "template_id": "xe9680_hgx_h100_8gpu_host"},
+        {"host_id": "host1", "template_id": "xe9680_hgx_h100_8gpu_host"},
+        {"host_id": "host2", "template_id": "xe9680_hgx_h100_8gpu_host"},
+        {"host_id": "host3", "template_id": "xe9680_hgx_h100_8gpu_host"},
+        {"host_id": "host4"},
+        {"host_id": "host5"}
+      ],
+      "memory_pool_count": 0,
+      "switch_count": 1,
+      "switch_type": "NVIDIA_QM9700_NDR64",
+      "intra_rack_topology": "switch",
+      "intra_rack_link_type": "NDR400_TO_RACK_SWITCH",
+      "intra_rack_link_qty": 8,
+      "limits": {
+        "max_slots": 60,
+        "max_switch_count": 1,
+        "max_rack_units": 42,
+        "max_power_watts": 50000
+      }
+    }
+  ],
+  "mutation": {
+    "search_granularity": "host",
+    "min_intra_rack_link_qty": 1,
+    "max_intra_rack_link_qty": 16,
+    "min_inter_rack_link_qty": 1,
+    "max_inter_rack_link_qty": 16,
+    "allow_remove_initial_racks": false
+  },
+  "limits": {
+    "max_total_cost": 10500000,
+    "max_peak_power_watts": 100000,
+    "max_rack_power_watts": 50000,
+    "max_rack_units": 42,
+    "max_total_racks": 3,
+    "min_compute_racks": 1,
+    "max_compute_racks": 3
+  },
+  "evaluation": {
+    "workload_kind": "mapper",
+    "mapper": "heft",
+    "parallel": "none",
+    "topology_format": "hardware",
+    "cleanup_wrapper_intermediate": true
+  }
+}
