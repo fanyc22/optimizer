@@ -123,6 +123,8 @@ class CandidateRepairer:
                 slot.node_type = None
                 slot.link_type = None
                 slot.link_qty = None
+            for host in rack.hosts:
+                host.clear()
             rack.memory_pool_count = 0
             rack.switch_count = 0
             if rack.model_dump() != original.model_dump():
@@ -139,6 +141,15 @@ class CandidateRepairer:
                     settings.min_intra_rack_link_qty,
                     min(settings.max_intra_rack_link_qty, slot.link_qty),
                 )
+        for host in rack.hosts:
+            host.host_link_qty = max(
+                settings.min_intra_rack_link_qty,
+                min(settings.max_intra_rack_link_qty, host.host_link_qty),
+            )
+            host.rack_uplink_link_qty = max(
+                settings.min_intra_rack_link_qty,
+                min(settings.max_intra_rack_link_qty, host.rack_uplink_link_qty),
+            )
         if rack.limits.max_switch_count is not None:
             rack.switch_count = min(rack.switch_count, rack.limits.max_switch_count)
         max_switches = rack.limits.max_switch_count
@@ -151,6 +162,8 @@ class CandidateRepairer:
         if rack.limits.max_memory_pool_count is not None:
             rack.memory_pool_count = min(rack.memory_pool_count, rack.limits.max_memory_pool_count)
         self._repair_rack_topology(rack)
+        for host in rack.occupied_hosts:
+            self._repair_host(host)
         if rack.model_dump() != original.model_dump():
             messages.append(f"repaired rack bounds for {rack.rack_id}")
 
@@ -176,6 +189,20 @@ class CandidateRepairer:
                 if fallback is not None:
                     rack.memory_link_type = fallback
 
+    def _repair_host(self, host: object) -> None:
+        host_link_type = getattr(host, "host_link_type", None)
+        occupied_count = len(getattr(host, "occupied_slots", []))
+        if occupied_count > 1 or (occupied_count > 0 and getattr(host, "host_topology", "") == "switch"):
+            if host_link_type is None or not link_type_allowed_for_scope(self._library, host_link_type, "host"):
+                fallback = self._fallback_link_type("host")
+                if fallback is not None:
+                    host.host_link_type = fallback
+        rack_uplink_link_type = getattr(host, "rack_uplink_link_type", None)
+        if rack_uplink_link_type is not None and not link_type_allowed_for_scope(self._library, rack_uplink_link_type, "intra"):
+            fallback = self._fallback_link_type("intra")
+            if fallback is not None:
+                host.rack_uplink_link_type = fallback
+
     def _repair_cluster_topology(self, chromosome: Chromosome, messages: list[str]) -> None:
         original = chromosome.model_dump()
         active_racks = [rack for rack in chromosome.racks if rack.active or not rack.optional]
@@ -183,7 +210,7 @@ class CandidateRepairer:
             self._space.mutation.min_inter_rack_link_qty,
             min(self._space.mutation.max_inter_rack_link_qty, chromosome.inter_rack_link_qty),
         )
-        if active_racks and chromosome.inter_rack == "none":
+        if len(active_racks) > 1 and chromosome.inter_rack == "none":
             chromosome.inter_rack = "ring"
         if len(active_racks) > 1 and chromosome.inter_rack not in {"ring", "fully_connected"}:
             chromosome.inter_rack = "ring"
@@ -321,6 +348,32 @@ class CandidateRepairer:
         return feasible, penalty
 
     def _rack_local_link_cost(self, rack: RackGene) -> float:
+        if rack.hosts:
+            host_cost = sum(self._host_local_link_cost(host) for host in rack.occupied_hosts)
+            if rack.intra_rack_topology == "none":
+                return host_cost
+            if rack.intra_rack_topology == "switch":
+                uplink_cost = sum(
+                    self._link_cost(host.rack_uplink_link_type or rack.intra_rack_link_type, host.rack_uplink_link_qty)
+                    for host in rack.occupied_hosts
+                )
+                memory_cost = 0.0
+                if rack.memory_pool_count:
+                    memory_cost = rack.memory_pool_count * self._link_cost(
+                        rack.memory_link_type or rack.intra_rack_link_type,
+                        rack.memory_link_qty,
+                    )
+                return host_cost + uplink_cost + memory_cost
+
+            node_count = len(rack.occupied_hosts) + rack.memory_pool_count
+            if node_count <= 1:
+                return host_cost
+            if rack.intra_rack_topology == "fully_connected":
+                pair_count = node_count * (node_count - 1) // 2
+            else:
+                pair_count = 1 if node_count == 2 else node_count
+            return host_cost + pair_count * self._link_cost(rack.intra_rack_link_type, rack.intra_rack_link_qty)
+
         if rack.intra_rack_topology == "none":
             return 0.0
         if rack.intra_rack_topology == "switch":
@@ -350,6 +403,19 @@ class CandidateRepairer:
             return 0.0
         return self._library.link_types[link_type].cost_unit * qty
 
+    def _host_local_link_cost(self, host: object) -> float:
+        occupied_slots = getattr(host, "occupied_slots", [])
+        node_count = len(occupied_slots)
+        if node_count <= 1:
+            return 0.0 if getattr(host, "host_topology", "") != "switch" else node_count * self._link_cost(getattr(host, "host_link_type", None), getattr(host, "host_link_qty", 1))
+        if getattr(host, "host_topology", "") == "switch":
+            return node_count * self._link_cost(getattr(host, "host_link_type", None), getattr(host, "host_link_qty", 1))
+        if getattr(host, "host_topology", "") == "fully_connected":
+            pair_count = node_count * (node_count - 1) // 2
+        else:
+            pair_count = 1 if node_count == 2 else node_count
+        return pair_count * self._link_cost(getattr(host, "host_link_type", None), getattr(host, "host_link_qty", 1))
+
     def _check_rack_device_limits(
         self,
         rack: RackGene,
@@ -373,6 +439,10 @@ class CandidateRepairer:
             messages.append(
                 f"{rack.rack_id} occupied slots exceeds max_slots: {len(rack.occupied_slots)} > {rack.max_slots}"
             )
+        if rack.max_hosts is not None and len(rack.hosts) > rack.max_hosts:
+            feasible = False
+            penalty += (len(rack.hosts) - rack.max_hosts) * 1000.0
+            messages.append(f"{rack.rack_id} host count exceeds max_hosts: {len(rack.hosts)} > {rack.max_hosts}")
         checks = [
             ("memory_pool_count", rack.memory_pool_count, rack.limits.max_memory_pool_count),
             ("switch_count", rack.switch_count, rack.limits.max_switch_count),
@@ -411,6 +481,38 @@ class CandidateRepairer:
                 feasible = False
                 penalty += 100_000.0
                 messages.append(f"{rack.rack_id}.{slot.slot_id} node type must be gpu or cpu: {slot.node_type}")
+        host_ids: set[str] = set()
+        for host in rack.hosts:
+            if host.host_id in host_ids:
+                feasible = False
+                penalty += 1000.0
+                messages.append(f"{rack.rack_id} has duplicate host_id {host.host_id}")
+            host_ids.add(host.host_id)
+            host_slot_ids: set[str] = set()
+            for slot in host.slots:
+                if slot.slot_id in host_slot_ids:
+                    feasible = False
+                    penalty += 1000.0
+                    messages.append(f"{rack.rack_id}.{host.host_id} has duplicate slot_id {slot.slot_id}")
+                host_slot_ids.add(slot.slot_id)
+                if not slot.node_type:
+                    continue
+                if slot.node_type not in self._library.node_types:
+                    feasible = False
+                    penalty += 100_000.0
+                    messages.append(f"{rack.rack_id}.{host.host_id}.{slot.slot_id} unknown node type {slot.node_type}")
+                    continue
+                role = node_role(slot.node_type, self._library.node_types[slot.node_type])
+                if role not in {"gpu", "cpu"}:
+                    feasible = False
+                    penalty += 100_000.0
+                    messages.append(
+                        f"{rack.rack_id}.{host.host_id}.{slot.slot_id} node type must be gpu or cpu: {slot.node_type}"
+                    )
+            if host.host_switch_type and host.host_switch_type not in self._library.node_types:
+                feasible = False
+                penalty += 100_000.0
+                messages.append(f"{rack.rack_id}.{host.host_id} unknown host switch type {host.host_switch_type}")
         return feasible, penalty
 
     def _check_rack_count_limits(
@@ -467,9 +569,14 @@ class CandidateRepairer:
             if radix is None:
                 continue
             endpoint_ports = 0
-            for slot in rack.occupied_slots:
-                link_type = slot.link_type or rack.intra_rack_link_type
-                endpoint_ports += (slot.link_qty or rack.intra_rack_link_qty) * self._link_lanes(link_type)
+            if rack.hosts:
+                for host in rack.occupied_hosts:
+                    link_type = host.rack_uplink_link_type or rack.intra_rack_link_type
+                    endpoint_ports += host.rack_uplink_link_qty * self._link_lanes(link_type)
+            else:
+                for slot in rack.occupied_slots:
+                    link_type = slot.link_type or rack.intra_rack_link_type
+                    endpoint_ports += (slot.link_qty or rack.intra_rack_link_qty) * self._link_lanes(link_type)
             if rack.memory_pool_count:
                 endpoint_ports += rack.memory_pool_count * rack.memory_link_qty * self._link_lanes(
                     rack.memory_link_type or rack.intra_rack_link_type
@@ -485,6 +592,18 @@ class CandidateRepairer:
                 messages.append(
                     f"{rack.rack_id} switch radix exceeded: {per_switch:.3f} > {radix}"
                 )
+            for host in rack.occupied_hosts:
+                if host.host_topology != "switch" or not host.host_switch_type:
+                    continue
+                host_spec = self._library.node_types.get(host.host_switch_type)
+                if host_spec is None or host_spec.radix is None:
+                    continue
+                host_ports = len(host.occupied_slots) * host.host_link_qty * self._link_lanes(host.host_link_type)
+                host_ports += host.rack_uplink_link_qty * self._link_lanes(host.rack_uplink_link_type or rack.intra_rack_link_type)
+                if host_ports > host_spec.radix:
+                    feasible = False
+                    penalty += (host_ports - host_spec.radix) * 1000.0
+                    messages.append(f"{rack.rack_id}.{host.host_id} host switch radix exceeded: {host_ports:.3f} > {host_spec.radix}")
         return feasible, penalty
 
     def _check_topology_connectivity(
@@ -558,6 +677,9 @@ class CandidateRepairer:
                 role = role_of_type(slot.node_type, self._library.node_types[slot.node_type].role)
                 if role in {"gpu", "cpu"}:
                     counts[slot.node_type] = counts.get(slot.node_type, 0) + 1
+        for host in rack.occupied_hosts:
+            if host.host_switch_type and host.host_switch_type in self._library.node_types:
+                counts[host.host_switch_type] = counts.get(host.host_switch_type, 0) + 1
         if rack.memory_pool_type and rack.memory_pool_count:
             counts[rack.memory_pool_type] = counts.get(rack.memory_pool_type, 0) + rack.memory_pool_count
         if rack.switch_type and rack.switch_count:

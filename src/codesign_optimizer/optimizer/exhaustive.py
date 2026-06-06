@@ -78,6 +78,8 @@ class ExhaustiveSearchRunner:
         allow_empty_slots: bool = True,
         min_occupied_slots: int | None = None,
     ) -> None:
+        if search_space.mutation.search_granularity == "host":
+            raise ValueError("host search_granularity is currently supported only by TG-RL/TG-RL v2")
         self._library = component_library
         self._space = search_space
         self._pipeline = pipeline_client
@@ -369,6 +371,8 @@ def validate_exhaustive_space(
     component_library: ComponentLibrary | None = None,
     allow_empty_slots: bool = True,
 ) -> None:
+    if space.mutation.search_granularity == "host":
+        raise ValueError("host search_granularity is currently supported only by TG-RL/TG-RL v2")
     if not space.exhaustive.slot_options and not allow_empty_slots:
         raise ValueError("exhaustive.slot_options must list the finite slot choices")
     if space.rack_archetypes:
@@ -394,6 +398,8 @@ def count_exhaustive_candidates(
     freeze_topology: bool = False,
     allow_empty_slots: bool = True,
 ) -> int:
+    if space.mutation.search_granularity == "host":
+        raise ValueError("host search_granularity is currently supported only by TG-RL/TG-RL v2")
     total = 0
     for template in space.templates:
         count = 1
@@ -444,6 +450,8 @@ def iter_exhaustive_chromosomes(
     freeze_topology: bool = False,
     allow_empty_slots: bool = True,
 ) -> list[Chromosome]:
+    if space.mutation.search_granularity == "host":
+        raise ValueError("host search_granularity is currently supported only by TG-RL/TG-RL v2")
     seen: set[str] = set()
     result: list[Chromosome] = []
     for template in space.templates:
@@ -487,8 +495,9 @@ def iter_exhaustive_chromosomes(
 
 
 def _drop_empty_racks(chromosome: Chromosome) -> None:
+    original_count = len(chromosome.racks)
     chromosome.racks = [rack for rack in chromosome.racks if not _rack_is_empty(rack)]
-    if len(chromosome.racks) <= 1:
+    if len(chromosome.racks) <= 1 and len(chromosome.racks) != original_count:
         chromosome.inter_rack = "none"
         chromosome.inter_rack_link_type = None
         chromosome.inter_rack_link_qty = 1

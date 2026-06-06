@@ -85,6 +85,8 @@ class HeuristicSearchRunner:
         generations: int,
         concurrency: int = 1,
     ) -> None:
+        if search_space.mutation.search_granularity == "host":
+            raise ValueError("host search_granularity is currently supported only by TG-RL/TG-RL v2")
         self._library = component_library
         self._space = search_space
         self._pipeline = pipeline_client

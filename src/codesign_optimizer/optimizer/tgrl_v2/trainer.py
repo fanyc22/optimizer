@@ -548,7 +548,9 @@ class TGRLPPOTrainer:
     def _initial_chromosome(self) -> Chromosome:
         if not self._space.templates:
             raise ValueError("search space must contain at least one template")
-        report = self._repairer.repair_and_validate(chromosome_from_template(self._space.templates[0]))
+        report = self._repairer.repair_and_validate(
+            chromosome_from_template(self._space.templates[0], host_templates=self._space.host_template_map())
+        )
         return report.chromosome
 
     def _evaluate_initials(self, chromosomes: list[Chromosome], update: int) -> list[TGRLEvaluation]:

@@ -1,0 +1,98 @@
+{
+  "node_types": {
+    "GPU_BALANCED_80TF_80GB": {
+      "role": "gpu",
+      "peak_tflops": 80,
+      "memory_bw_gbps": 1800,
+      "memory_latency_ns": 80,
+      "local_memory_gb": 80,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 700,
+      "cost_unit": 24000,
+      "rack_units": 1
+    },
+    "CPU_HIGH_BW_96C": {
+      "role": "cpu",
+      "peak_tflops": 6,
+      "memory_bw_gbps": 460,
+      "memory_latency_ns": 90,
+      "local_memory_gb": 768,
+      "slots": 8,
+      "max_parallelism": 8,
+      "comm_slots": 1,
+      "tdp_watts": 400,
+      "cost_unit": 8500,
+      "rack_units": 1
+    },
+    "HOST_PCIE_SWITCH_32": {
+      "role": "switch",
+      "radix": 32,
+      "tdp_watts": 120,
+      "cost_unit": 4000,
+      "rack_units": 1
+    },
+    "HOST_NVSWITCH_18": {
+      "role": "switch",
+      "radix": 18,
+      "tdp_watts": 420,
+      "cost_unit": 18000,
+      "rack_units": 1
+    },
+    "HYBRID_RACK_SWITCH_64": {
+      "role": "switch",
+      "radix": 64,
+      "tdp_watts": 420,
+      "cost_unit": 20000,
+      "rack_units": 1
+    }
+  },
+  "link_types": {
+    "HOST_PCIE_64G": {
+      "bandwidth_gbps": 64,
+      "latency_ns": 180,
+      "protocol": "PCIe",
+      "technology": "host_pcie_switch",
+      "level": "L2",
+      "lanes": 1,
+      "cost_unit": 400
+    },
+    "HOST_NVLINK_200G": {
+      "bandwidth_gbps": 200,
+      "latency_ns": 80,
+      "protocol": "NVLink",
+      "technology": "host_nvlink_switch",
+      "level": "L2",
+      "lanes": 1,
+      "cost_unit": 1200
+    },
+    "RACK_PCIE_200G": {
+      "bandwidth_gbps": 200,
+      "latency_ns": 220,
+      "protocol": "PCIe",
+      "technology": "host_to_rack_pcie",
+      "level": "L3",
+      "lanes": 2,
+      "cost_unit": 1000
+    },
+    "RACK_FABRIC_400G": {
+      "bandwidth_gbps": 400,
+      "latency_ns": 140,
+      "protocol": "NVLink",
+      "technology": "host_to_rack_fabric",
+      "level": "L3",
+      "lanes": 2,
+      "cost_unit": 2800
+    },
+    "OPTICAL_400G": {
+      "bandwidth_gbps": 400,
+      "latency_ns": 900,
+      "protocol": "Optical",
+      "technology": "inter_rack_optical_400g",
+      "level": "L4",
+      "lanes": 4,
+      "cost_unit": 3500
+    }
+  }
+}

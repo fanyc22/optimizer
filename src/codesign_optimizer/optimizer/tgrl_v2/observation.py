@@ -17,10 +17,10 @@ from codesign_optimizer.optimizer.tgrl import (
 from codesign_optimizer.optimizer.workload_suite import MultiWorkloadFeedback
 
 
-NODE_FEATURE_DIM = 23
+NODE_FEATURE_DIM = 24
 EDGE_FEATURE_DIM = 8
 GLOBAL_FEATURE_DIM = 15
-ACTION_FEATURE_DIM = 30
+ACTION_FEATURE_DIM = 40
 
 
 @dataclass
@@ -95,23 +95,57 @@ class GraphObservationBuilder:
             node_features.append(self._rack_features(rack, context))
             self._add_edge(edge_index, edge_features, 0, rack_idx, [1.0, 0.0, 0.0, float(rack.active), 0.0, 0.0, 0.0, 0.0])
             self._add_edge(edge_index, edge_features, rack_idx, 0, [1.0, 0.0, 0.0, float(rack.active), 0.0, 0.0, 0.0, 0.0])
-            for slot in rack.slots:
-                res_idx = len(node_features)
-                node_lookup[("slot", rack.rack_id, slot.slot_id)] = res_idx
-                node_features.append(self._slot_features(rack, slot, context))
-                link_qty = (slot.link_qty or rack.intra_rack_link_qty) if slot.node_type else rack.intra_rack_link_qty
-                edge_feat = [
-                    1.0,
-                    0.0,
-                    1.0,
-                    float(rack.active),
-                    min(1.0, link_qty / max(1.0, self._space.mutation.max_intra_rack_link_qty)),
-                    1.0 if rack.intra_rack_topology == "switch" else 0.0,
-                    0.0,
-                    1.0 if rack.rack_id in context.top_domain else 0.0,
-                ]
-                self._add_edge(edge_index, edge_features, rack_idx, res_idx, edge_feat)
-                self._add_edge(edge_index, edge_features, res_idx, rack_idx, edge_feat)
+            if rack.hosts:
+                for host in rack.hosts:
+                    host_idx = len(node_features)
+                    node_lookup[("host", rack.rack_id, host.host_id)] = host_idx
+                    node_features.append(self._host_features(rack, host, context))
+                    host_edge = [
+                        1.0,
+                        0.0,
+                        1.0,
+                        float(rack.active),
+                        min(1.0, host.rack_uplink_link_qty / max(1.0, self._space.mutation.max_intra_rack_link_qty)),
+                        1.0 if rack.intra_rack_topology == "switch" else 0.0,
+                        0.0,
+                        1.0 if rack.rack_id in context.top_domain else 0.0,
+                    ]
+                    self._add_edge(edge_index, edge_features, rack_idx, host_idx, host_edge)
+                    self._add_edge(edge_index, edge_features, host_idx, rack_idx, host_edge)
+                    for slot in host.slots:
+                        res_idx = len(node_features)
+                        node_lookup[("slot", rack.rack_id, host.host_id, slot.slot_id)] = res_idx
+                        node_features.append(self._slot_features(rack, slot, context))
+                        slot_edge = [
+                            1.0,
+                            0.0,
+                            1.0,
+                            float(rack.active),
+                            min(1.0, host.host_link_qty / max(1.0, self._space.mutation.max_intra_rack_link_qty)),
+                            1.0 if host.host_topology == "switch" else 0.0,
+                            0.0,
+                            1.0 if f"host:{rack.rack_id}/{host.host_id}" in context.top_domain else 0.0,
+                        ]
+                        self._add_edge(edge_index, edge_features, host_idx, res_idx, slot_edge)
+                        self._add_edge(edge_index, edge_features, res_idx, host_idx, slot_edge)
+            else:
+                for slot in rack.slots:
+                    res_idx = len(node_features)
+                    node_lookup[("slot", rack.rack_id, slot.slot_id)] = res_idx
+                    node_features.append(self._slot_features(rack, slot, context))
+                    link_qty = (slot.link_qty or rack.intra_rack_link_qty) if slot.node_type else rack.intra_rack_link_qty
+                    edge_feat = [
+                        1.0,
+                        0.0,
+                        1.0,
+                        float(rack.active),
+                        min(1.0, link_qty / max(1.0, self._space.mutation.max_intra_rack_link_qty)),
+                        1.0 if rack.intra_rack_topology == "switch" else 0.0,
+                        0.0,
+                        1.0 if rack.rack_id in context.top_domain else 0.0,
+                    ]
+                    self._add_edge(edge_index, edge_features, rack_idx, res_idx, edge_feat)
+                    self._add_edge(edge_index, edge_features, res_idx, rack_idx, edge_feat)
 
         active_racks = [rack for rack in chromosome.racks if rack.active or not rack.optional]
         if chromosome.inter_rack != "none" and len(active_racks) > 1:
@@ -233,9 +267,48 @@ class GraphObservationBuilder:
         ]
         return _pad(features, NODE_FEATURE_DIM)
 
+    def _host_features(self, rack: RackGene, host: Any, context: TelemetryContext) -> list[float]:
+        peak = 0.0
+        memory_bw = 0.0
+        cost_power = 0.0
+        gpu_count = 0
+        cpu_count = 0
+        for slot in host.occupied_slots:
+            spec = self._library.node_types.get(slot.node_type) if slot.node_type else None
+            kind = _node_kind(spec)
+            if kind == "gpu":
+                gpu_count += 1
+            elif kind == "cpu":
+                cpu_count += 1
+            if spec:
+                peak += _node_peak(spec)
+                memory_bw += spec.memory_bw_gbps or 0.0
+                cost_power += spec.cost_unit + spec.tdp_watts
+        features = self._kind_one_hot("host") + self._role_one_hot(rack.role)
+        features += [
+            float(rack.active),
+            float(rack.optional),
+            gpu_count / 16.0,
+            cpu_count / 32.0,
+            0.0,
+            1.0 if host.template_id else 0.0,
+            1.0 if host.host_topology == "switch" else 0.0,
+            peak / 400.0,
+            memory_bw / 8000.0,
+            cost_power / 200_000.0,
+            context.compute_utilization,
+            context.network_utilization,
+            context.remote_memory_pressure,
+            1.0 if f"host:{rack.rack_id}/{host.host_id}" in context.top_domain else 0.0,
+        ]
+        return _pad(features, NODE_FEATURE_DIM)
+
     def _action_features(self, item: MaskedAction, context: TelemetryContext) -> list[float]:
         action = item.action
         action_type_order = [
+            "add_host_to_bay",
+            "remove_host_from_bay",
+            "replace_host_template",
             "add_node_to_slot",
             "remove_node_from_slot",
             "replace_node_type",
@@ -252,10 +325,10 @@ class GraphObservationBuilder:
             "add_rack_from_template",
             "remove_rack",
         ]
-        resource_order = ["slot", "intra_rack_link", "inter_rack_link", "none"]
+        resource_order = ["host", "slot", "intra_rack_link", "inter_rack_link", "none"]
         rack = _find_rack(item.chromosome, action.rack_id) if action.rack_id else None
         features = [1.0 if action.action_type == value else 0.0 for value in action_type_order]
-        resource_label = "slot" if rack and any(slot.slot_id == action.resource for slot in rack.slots) else (action.resource or "none")
+        resource_label = _resource_label(rack, action.resource)
         features += [1.0 if resource_label == value else 0.0 for value in resource_order]
         features += self._role_one_hot(rack.role if rack else "")
         features += [
@@ -276,6 +349,8 @@ class GraphObservationBuilder:
     def _action_target_index(self, item: MaskedAction, node_lookup: dict[tuple[str, ...], int]) -> int:
         action = item.action
         if action.rack_id:
+            if ("host", action.rack_id, action.resource) in node_lookup:
+                return node_lookup[("host", action.rack_id, action.resource)]
             if ("slot", action.rack_id, action.resource) in node_lookup:
                 return node_lookup[("slot", action.rack_id, action.resource)]
             if ("rack", action.rack_id) in node_lookup:
@@ -295,7 +370,7 @@ class GraphObservationBuilder:
         edge_features.append(_pad(features, EDGE_FEATURE_DIM))
 
     def _kind_one_hot(self, kind: str) -> list[float]:
-        order = ["global", "rack", "slot", "gpu", "cpu", "memory", "switch"]
+        order = ["global", "rack", "host", "slot", "gpu", "cpu", "memory", "switch"]
         return [1.0 if kind == value else 0.0 for value in order]
 
     def _role_one_hot(self, role: str) -> list[float]:
@@ -320,6 +395,9 @@ class GraphObservationBuilder:
         ]:
             if type_name and count and type_name in self._library.node_types:
                 result.append((type_name, count))
+        for host in rack.occupied_hosts:
+            if host.host_switch_type and host.host_switch_type in self._library.node_types:
+                result.append((host.host_switch_type, 1))
         return result
 
     def _resource_count(self, rack: RackGene, resource: str) -> int:
@@ -368,6 +446,19 @@ def _find_rack(chromosome: Chromosome, rack_id: str) -> RackGene | None:
         if rack.rack_id == rack_id:
             return rack
     return None
+
+
+def _resource_label(rack: RackGene | None, resource: str) -> str:
+    if rack is None:
+        return resource or "none"
+    if any(host.host_id == resource for host in rack.hosts):
+        return "host"
+    if any(slot.slot_id == resource for slot in rack.slots):
+        return "slot"
+    for host in rack.hosts:
+        if any(slot.slot_id == resource for slot in host.slots):
+            return "slot"
+    return resource or "none"
 
 
 def _node_peak(spec: Any) -> float:

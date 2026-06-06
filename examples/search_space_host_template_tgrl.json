@@ -1,0 +1,135 @@
+{
+  "seed": 2601,
+  "host_templates": [
+    {
+      "template_id": "pcie_2cpu_4gpu_host",
+      "slots": [
+        {"slot_id": "cpu0", "node_type": "CPU_HIGH_BW_96C"},
+        {"slot_id": "cpu1", "node_type": "CPU_HIGH_BW_96C"},
+        {"slot_id": "gpu0", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu1", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu2", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu3", "node_type": "GPU_BALANCED_80TF_80GB"}
+      ],
+      "host_topology": "switch",
+      "host_switch_type": "HOST_PCIE_SWITCH_32",
+      "host_link_type": "HOST_PCIE_64G",
+      "host_link_qty": 1,
+      "rack_uplink_link_type": "RACK_PCIE_200G",
+      "rack_uplink_link_qty": 1
+    },
+    {
+      "template_id": "nvlink_2cpu_8gpu_host",
+      "slots": [
+        {"slot_id": "cpu0", "node_type": "CPU_HIGH_BW_96C"},
+        {"slot_id": "cpu1", "node_type": "CPU_HIGH_BW_96C"},
+        {"slot_id": "gpu0", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu1", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu2", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu3", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu4", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu5", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu6", "node_type": "GPU_BALANCED_80TF_80GB"},
+        {"slot_id": "gpu7", "node_type": "GPU_BALANCED_80TF_80GB"}
+      ],
+      "host_topology": "switch",
+      "host_switch_type": "HOST_NVSWITCH_18",
+      "host_link_type": "HOST_NVLINK_200G",
+      "host_link_qty": 1,
+      "rack_uplink_link_type": "RACK_FABRIC_400G",
+      "rack_uplink_link_qty": 1
+    },
+    {
+      "template_id": "cpu_2socket_host",
+      "slots": [
+        {"slot_id": "cpu0", "node_type": "CPU_HIGH_BW_96C"},
+        {"slot_id": "cpu1", "node_type": "CPU_HIGH_BW_96C"}
+      ],
+      "host_topology": "switch",
+      "host_switch_type": "HOST_PCIE_SWITCH_32",
+      "host_link_type": "HOST_PCIE_64G",
+      "host_link_qty": 1,
+      "rack_uplink_link_type": "RACK_PCIE_200G",
+      "rack_uplink_link_qty": 1
+    }
+  ],
+  "templates": [
+    {
+      "name": "host_template_tgrl_single_rack",
+      "racks": [
+        {
+          "rack_id": "rack0",
+          "role": "compute",
+          "max_slots": 18,
+          "max_hosts": 3,
+          "hosts": [
+            {"host_id": "host0", "template_id": "pcie_2cpu_4gpu_host"},
+            {"host_id": "host1"},
+            {"host_id": "host2", "template_id": "cpu_2socket_host"}
+          ],
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "RACK_PCIE_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_slots": 18,
+            "max_switch_count": 1,
+            "max_rack_units": 32,
+            "max_power_watts": 16000
+          }
+        }
+      ],
+      "inter_rack": "none",
+      "inter_rack_link_type": "OPTICAL_400G",
+      "inter_rack_link_qty": 1
+    }
+  ],
+  "rack_archetypes": [
+    {
+      "name": "pcie_compute_leaf",
+      "rack_id_prefix": "pcie-leaf",
+      "role": "compute",
+      "max_slots": 6,
+      "max_hosts": 1,
+      "hosts": [
+        {"host_id": "host0", "template_id": "pcie_2cpu_4gpu_host"}
+      ],
+      "memory_pool_count": 0,
+      "switch_count": 1,
+      "switch_type": "HYBRID_RACK_SWITCH_64",
+      "intra_rack_topology": "switch",
+      "intra_rack_link_type": "RACK_PCIE_200G",
+      "intra_rack_link_qty": 1,
+      "limits": {
+        "max_slots": 6,
+        "max_switch_count": 1,
+        "max_rack_units": 16,
+        "max_power_watts": 9000
+      }
+    }
+  ],
+  "mutation": {
+    "search_granularity": "host",
+    "min_intra_rack_link_qty": 1,
+    "max_intra_rack_link_qty": 4,
+    "min_inter_rack_link_qty": 1,
+    "max_inter_rack_link_qty": 4,
+    "allow_remove_initial_racks": false
+  },
+  "limits": {
+    "max_total_cost": 1000000,
+    "max_peak_power_watts": 20000,
+    "max_rack_power_watts": 16000,
+    "max_rack_units": 32,
+    "max_total_racks": 2
+  },
+  "evaluation": {
+    "workload_kind": "mapper",
+    "mapper": "heft",
+    "parallel": "none",
+    "topology_format": "hardware",
+    "cleanup_wrapper_intermediate": true
+  }
+}

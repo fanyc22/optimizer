@@ -37,6 +37,7 @@ class SearchObjectiveWeights(BaseModel):
 class MutationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    search_granularity: Literal["slot", "host"] = "slot"
     min_intra_rack_link_qty: int = Field(default=1, ge=1)
     max_intra_rack_link_qty: int = Field(default=8, ge=1)
     min_inter_rack_link_qty: int = Field(default=1, ge=1)
@@ -156,6 +157,40 @@ class SlotSpec(BaseModel):
     link_qty: int | None = Field(default=None, ge=1)
 
 
+class HostTemplateSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    template_id: str
+    slots: list[SlotSpec] = Field(default_factory=list)
+    host_topology: FabricMode = "switch"
+    host_switch_type: str | None = None
+    host_link_type: str | None = None
+    host_link_qty: int = Field(default=1, ge=1)
+    rack_uplink_link_type: str | None = None
+    rack_uplink_link_qty: int = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def validate_host_template(self) -> "HostTemplateSpec":
+        slot_ids = [slot.slot_id for slot in self.slots]
+        if len(slot_ids) != len(set(slot_ids)):
+            raise ValueError(f"host template {self.template_id} has duplicate slot_id")
+        occupied = [slot for slot in self.slots if slot.node_type]
+        if self.host_topology == "switch" and occupied and self.host_switch_type is None:
+            raise ValueError(f"host template {self.template_id} uses switch topology but has no host_switch_type")
+        if self.host_topology != "none" and len(occupied) > 1 and self.host_link_type is None:
+            raise ValueError(f"host template {self.template_id} needs host_link_type")
+        if self.host_topology == "none" and len(occupied) > 1:
+            raise ValueError(f"host template {self.template_id} has multiple slots but host_topology=none")
+        return self
+
+
+class HostSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    host_id: str
+    template_id: str | None = None
+
+
 class RackCapacityLimits(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -184,8 +219,10 @@ class RackSpec(BaseModel):
     active: bool = True
     activation_alpha: float | None = Field(default=None, ge=0)
     origin: RackOrigin = "seed"
-    max_slots: int = Field(ge=0)
+    max_slots: int = Field(default=0, ge=0)
     slots: list[SlotSpec] = Field(default_factory=list)
+    max_hosts: int | None = Field(default=None, ge=0)
+    hosts: list[HostSpec] = Field(default_factory=list)
     memory_pool_count: int = Field(default=0, ge=0)
     switch_count: int = Field(default=1, ge=0)
     memory_pool_type: str | None = None
@@ -202,6 +239,15 @@ class RackSpec(BaseModel):
         slot_ids = [slot.slot_id for slot in self.slots]
         if len(slot_ids) != len(set(slot_ids)):
             raise ValueError(f"rack {self.rack_id} has duplicate slot_id")
+        host_ids = [host.host_id for host in self.hosts]
+        if len(host_ids) != len(set(host_ids)):
+            raise ValueError(f"rack {self.rack_id} has duplicate host_id")
+        if self.hosts and self.slots:
+            raise ValueError(f"rack {self.rack_id} cannot define both legacy slots and hosts")
+        if self.max_hosts is None:
+            self.max_hosts = len(self.hosts)
+        if self.max_hosts is not None and len(self.hosts) > self.max_hosts:
+            raise ValueError(f"rack {self.rack_id} has more hosts than max_hosts")
         if len(self.slots) > self.max_slots:
             raise ValueError(f"rack {self.rack_id} has more slots than max_slots")
         if self.limits.max_slots is None:
@@ -215,8 +261,10 @@ class RackSpec(BaseModel):
         if self.memory_pool_count > 0 and self.memory_pool_type is None:
             raise ValueError(f"rack {self.rack_id} has memory pools but memory_pool_type is not set")
         occupied = [slot for slot in self.slots if slot.node_type]
+        occupied_hosts = [host for host in self.hosts if host.template_id]
         if self.role in {"compute", "hybrid"} and not occupied:
-            raise ValueError(f"rack {self.rack_id} must contain at least one occupied compute slot")
+            if not occupied_hosts:
+                raise ValueError(f"rack {self.rack_id} must contain at least one occupied compute slot or host")
         if self.role == "memory" and self.memory_pool_count <= 0:
             raise ValueError(f"rack {self.rack_id} role=memory must contain memory pools")
         return self
@@ -228,8 +276,10 @@ class RackArchetype(BaseModel):
     name: str
     rack_id_prefix: str | None = None
     role: RackRole = "compute"
-    max_slots: int = Field(ge=0)
+    max_slots: int = Field(default=0, ge=0)
     slots: list[SlotSpec] = Field(default_factory=list)
+    max_hosts: int | None = Field(default=None, ge=0)
+    hosts: list[HostSpec] = Field(default_factory=list)
     memory_pool_count: int = Field(default=0, ge=0)
     switch_count: int = Field(default=1, ge=0)
     memory_pool_type: str | None = None
@@ -255,6 +305,8 @@ class RackArchetype(BaseModel):
             origin=origin,
             max_slots=self.max_slots,
             slots=[slot.model_copy(deep=True) for slot in self.slots],
+            max_hosts=self.max_hosts,
+            hosts=[host.model_copy(deep=True) for host in self.hosts],
             memory_pool_count=self.memory_pool_count,
             switch_count=self.switch_count,
             memory_pool_type=self.memory_pool_type,
@@ -287,7 +339,7 @@ class RackTemplate(BaseModel):
             for rack in self.racks
             if (rack.active or not rack.optional)
             and rack.role in {"compute", "hybrid"}
-            and any(slot.node_type for slot in rack.slots)
+            and (any(slot.node_type for slot in rack.slots) or any(host.template_id for host in rack.hosts))
         ]
         if not active_compute_racks:
             raise ValueError(f"template {self.name} must contain at least one active compute rack")
@@ -300,6 +352,7 @@ class SearchSpace(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     seed: int = 1
+    host_templates: list[HostTemplateSpec] = Field(default_factory=list)
     templates: list[RackTemplate]
     rack_archetypes: list[RackArchetype] = Field(default_factory=list)
     mutation: MutationSettings = Field(default_factory=MutationSettings)
@@ -315,10 +368,40 @@ class SearchSpace(BaseModel):
         names = [item.name for item in self.rack_archetypes]
         if len(names) != len(set(names)):
             raise ValueError("rack_archetypes must have unique names")
+        template_ids = [item.template_id for item in self.host_templates]
+        if len(template_ids) != len(set(template_ids)):
+            raise ValueError("host_templates must have unique template_id")
+        host_template_ids = set(template_ids)
+        if self.mutation.search_granularity == "host" and not host_template_ids:
+            raise ValueError("host search_granularity requires host_templates")
+        for rack in _all_rack_specs(self):
+            fixed_rank_slots = 0
+            for host in rack.hosts:
+                if host.template_id is not None and host.template_id not in host_template_ids:
+                    raise ValueError(f"rack {rack.rack_id} references unknown host template {host.template_id}")
+                if host.template_id is not None:
+                    template = self.host_template_map()[host.template_id]
+                    fixed_rank_slots += sum(1 for slot in template.slots if slot.node_type)
+            if rack.hosts and rack.max_slots == 0 and fixed_rank_slots > 0:
+                rack.max_slots = fixed_rank_slots
+                if rack.limits.max_slots == 0:
+                    rack.limits.max_slots = fixed_rank_slots
         return self
+
+    def host_template_map(self) -> dict[str, HostTemplateSpec]:
+        return {template.template_id: template for template in self.host_templates}
 
 
 def load_component_library(payload: dict) -> ComponentLibrary:
     if "component_library" in payload:
         payload = payload["component_library"]
     return ComponentLibrary.model_validate(payload)
+
+
+def _all_rack_specs(space: SearchSpace) -> list[RackSpec]:
+    racks: list[RackSpec] = []
+    for template in space.templates:
+        racks.extend(template.racks)
+    for archetype in space.rack_archetypes:
+        racks.append(archetype.to_rack_spec(archetype.rack_id_prefix or archetype.name))
+    return racks

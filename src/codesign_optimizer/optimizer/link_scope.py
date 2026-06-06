@@ -6,7 +6,7 @@ from typing import Literal
 from codesign_optimizer.models.hardware import ComponentLibrary, LinkTypeSpec
 
 
-LinkScope = Literal["intra", "inter"]
+LinkScope = Literal["host", "intra", "inter"]
 
 
 def link_type_allowed_for_scope(
@@ -26,9 +26,11 @@ def link_spec_allowed_for_scope(spec: LinkTypeSpec, scope: LinkScope) -> bool:
     level = link_level_number(spec)
     if level is None:
         return False
+    if scope == "host":
+        return level <= 2
     if scope == "inter":
         return level >= 4
-    return level <= 3
+    return 2 < level <= 3
 
 
 def link_types_for_scope(library: ComponentLibrary, scope: LinkScope) -> list[str]:
@@ -61,8 +63,12 @@ def link_level_number(spec: LinkTypeSpec) -> int | None:
 
 
 def default_level_for_scope(scope: LinkScope) -> str:
+    if scope == "host":
+        return "L2"
     return "L4" if scope == "inter" else "L3"
 
 
 def scope_label(scope: LinkScope) -> str:
+    if scope == "host":
+        return "host-local"
     return "inter-rack" if scope == "inter" else "intra-rack"

@@ -11,7 +11,7 @@ from codesign_optimizer.models.hardware import (
     LinkTypeSpec,
     NodeTypeSpec,
 )
-from codesign_optimizer.optimizer.chromosome import Chromosome, RackGene, SlotGene, role_of_type
+from codesign_optimizer.optimizer.chromosome import Chromosome, HostGene, RackGene, SlotGene, role_of_type
 from codesign_optimizer.optimizer.link_scope import (
     LinkScope,
     default_level_for_scope,
@@ -55,19 +55,55 @@ class HardwareTopologyExporter:
             switch_ids = self._add_switches(rack, nodes, proposal_nodes, rack_children)
 
             compute_ids: list[str] = []
-            for slot in rack.occupied_slots:
-                node_id = f"{rack.rack_id}_{slot.slot_id}"
-                compute_ids.append(node_id)
-                rank = self._add_compute_node(
-                    nodes,
-                    proposal_nodes,
-                    rank_map,
-                    rack_children,
-                    node_id=node_id,
-                    rack_id=rack.rack_id,
-                    type_name=self._require_node_type(slot.node_type, "slot.node_type"),
-                    rank=rank,
-                )
+            host_gateways: list[tuple[str, HostGene]] = []
+            if rack.hosts:
+                for host in rack.occupied_hosts:
+                    host_group_id = self._host_group_id(rack.rack_id, host.host_id)
+                    rack_children.append(host_group_id)
+                    host_children: list[str] = []
+                    gateway, host_compute_ids, rank = self._add_host(
+                        rack,
+                        host,
+                        host_group_id,
+                        nodes,
+                        proposal_nodes,
+                        rank_map,
+                        host_children,
+                        links,
+                        proposal_links,
+                        rank,
+                    )
+                    compute_ids.extend(host_compute_ids)
+                    if gateway:
+                        host_gateways.append((gateway, host))
+                    groups.append(
+                        {
+                            "id": host_group_id,
+                            "level": "L2",
+                            "type": "Host",
+                            "parent": rack.rack_id,
+                            "children": host_children,
+                            "attrs": {
+                                "host_id": host.host_id,
+                                "template_id": host.template_id,
+                                "host_topology": host.host_topology,
+                            },
+                        }
+                    )
+            else:
+                for slot in rack.occupied_slots:
+                    node_id = f"{rack.rack_id}_{slot.slot_id}"
+                    compute_ids.append(node_id)
+                    rank = self._add_compute_node(
+                        nodes,
+                        proposal_nodes,
+                        rank_map,
+                        rack_children,
+                        node_id=node_id,
+                        rack_id=rack.rack_id,
+                        type_name=self._require_node_type(slot.node_type, "slot.node_type"),
+                        rank=rank,
+                    )
 
             memory_ids: list[str] = []
             for idx in range(rack.memory_pool_count):
@@ -84,15 +120,25 @@ class HardwareTopologyExporter:
                 if memory_provider is None:
                     memory_provider = {"node_id": node_id, "capability_id": "pool_mem"}
 
-            self._connect_rack(
-                rack,
-                compute_ids,
-                memory_ids,
-                switch_ids,
-                links,
-                proposal_links,
-            )
-            gateway = self._rack_gateway(switch_ids, compute_ids, memory_ids)
+            if rack.hosts:
+                self._connect_rack_hosts(
+                    rack,
+                    host_gateways,
+                    memory_ids,
+                    switch_ids,
+                    links,
+                    proposal_links,
+                )
+            else:
+                self._connect_rack(
+                    rack,
+                    compute_ids,
+                    memory_ids,
+                    switch_ids,
+                    links,
+                    proposal_links,
+                )
+            gateway = self._rack_gateway(switch_ids, [item[0] for item in host_gateways] or compute_ids, memory_ids)
             if gateway:
                 rack_gateways.append(gateway)
 
@@ -178,6 +224,79 @@ class HardwareTopologyExporter:
             )
         return switch_ids
 
+    def _add_host(
+        self,
+        rack: RackGene,
+        host: HostGene,
+        host_group_id: str,
+        nodes: list[dict[str, Any]],
+        proposal_nodes: list[InstantiatedNode],
+        rank_map: list[dict[str, Any]],
+        host_children: list[str],
+        links: list[dict[str, Any]],
+        proposal_links: list[InstantiatedLink],
+        rank: int,
+    ) -> tuple[str | None, list[str], int]:
+        host_switch_ids = self._add_host_switches(host, host_group_id, rack.rack_id, nodes, proposal_nodes, host_children)
+        compute_ids: list[str] = []
+        for slot in host.occupied_slots:
+            node_id = f"{rack.rack_id}_{host.host_id}_{slot.slot_id}"
+            compute_ids.append(node_id)
+            rank = self._add_compute_node(
+                nodes,
+                proposal_nodes,
+                rank_map,
+                host_children,
+                node_id=node_id,
+                rack_id=rack.rack_id,
+                type_name=self._require_node_type(slot.node_type, "host slot.node_type"),
+                rank=rank,
+                parent_id=host_group_id,
+                level="L2",
+                domain=f"host:{rack.rack_id}/{host.host_id}",
+                attrs={
+                    "slot_id": slot.slot_id,
+                    "host_id": host.host_id,
+                    "host_template_id": host.template_id,
+                    "node_type": slot.node_type,
+                },
+            )
+        self._connect_host(host, compute_ids, host_switch_ids, links, proposal_links, rack_id=rack.rack_id)
+        return self._rack_gateway(host_switch_ids, compute_ids, []), compute_ids, rank
+
+    def _add_host_switches(
+        self,
+        host: HostGene,
+        host_group_id: str,
+        rack_id: str,
+        nodes: list[dict[str, Any]],
+        proposal_nodes: list[InstantiatedNode],
+        host_children: list[str],
+    ) -> list[str]:
+        if host.host_topology != "switch" or not host.occupied_slots:
+            return []
+        type_name = self._require_node_type(host.host_switch_type, "host_switch_type")
+        spec = self._library.node_types[type_name]
+        node_id = f"{host_group_id}_sw0"
+        host_children.append(node_id)
+        proposal_nodes.append(InstantiatedNode(node_id=node_id, type=type_name))
+        nodes.append(
+            {
+                "id": node_id,
+                "parent": host_group_id,
+                "level": "L2",
+                "domain": f"host:{rack_id}/{host.host_id}",
+                "role": "switch",
+                "capabilities": {
+                    "network": {
+                        "kind": "switch",
+                        "radix": spec.radix or 64,
+                    }
+                },
+            }
+        )
+        return [node_id]
+
     def _add_compute_node(
         self,
         nodes: list[dict[str, Any]],
@@ -189,6 +308,10 @@ class HardwareTopologyExporter:
         rack_id: str,
         type_name: str,
         rank: int,
+        parent_id: str | None = None,
+        level: str = "L3",
+        domain: str | None = None,
+        attrs: dict[str, Any] | None = None,
     ) -> int:
         spec = self._library.node_types[type_name]
         kind = node_role(type_name, spec)
@@ -200,15 +323,16 @@ class HardwareTopologyExporter:
         rack_children.append(node_id)
         proposal_nodes.append(InstantiatedNode(node_id=node_id, type=type_name))
         rank_map.append({"rank": rank, "node_id": node_id})
+        node_attrs = attrs or {"slot_id": node_id.rsplit("_", 1)[-1], "node_type": type_name}
         nodes.append(
             {
                 "id": node_id,
                 "rank": rank,
-                "parent": rack_id,
-                "level": "L3",
-                "domain": f"rack:{rack_id}",
+                "parent": parent_id or rack_id,
+                "level": level,
+                "domain": domain or f"rack:{rack_id}",
                 "role": "rank_compute",
-                "attrs": {"slot_id": node_id.rsplit("_", 1)[-1], "node_type": type_name},
+                "attrs": node_attrs,
                 "capabilities": {
                     "compute": [
                         {
@@ -359,6 +483,133 @@ class HardwareTopologyExporter:
                 scope="intra",
             )
 
+    def _connect_host(
+        self,
+        host: HostGene,
+        compute_ids: list[str],
+        switch_ids: list[str],
+        links: list[dict[str, Any]],
+        proposal_links: list[InstantiatedLink],
+        *,
+        rack_id: str,
+    ) -> None:
+        if host.host_topology == "none":
+            if len(compute_ids) <= 1:
+                return
+            raise ValueError(f"host {host.host_id} has multiple ranks but host_topology=none")
+        if host.host_topology == "switch":
+            if not switch_ids:
+                raise ValueError(f"host {host.host_id} switch topology has no switch")
+            switch_id = switch_ids[0]
+            for node_id in compute_ids:
+                self._add_link(
+                    links,
+                    proposal_links,
+                    link_id=f"{node_id}_to_{switch_id}",
+                    src=node_id,
+                    dst=switch_id,
+                    link_type=host.host_link_type,
+                    qty=host.host_link_qty,
+                    stats_domain=f"host:{rack_id}/{host.host_id}",
+                    bidirectional=True,
+                    scope="host",
+            )
+            return
+
+        if len(compute_ids) <= 1:
+            return
+        if host.host_topology == "fully_connected":
+            pairs = [(src, dst) for idx, src in enumerate(compute_ids) for dst in compute_ids[idx + 1 :]]
+        else:
+            pairs = (
+                [(compute_ids[0], compute_ids[1])]
+                if len(compute_ids) == 2
+                else [(src, compute_ids[(idx + 1) % len(compute_ids)]) for idx, src in enumerate(compute_ids)]
+            )
+        for src, dst in pairs:
+            self._add_link(
+                links,
+                proposal_links,
+                link_id=f"{src}_to_{dst}",
+                src=src,
+                dst=dst,
+                link_type=host.host_link_type,
+                qty=host.host_link_qty,
+                stats_domain=f"host:{rack_id}/{host.host_id}",
+                bidirectional=True,
+                scope="host",
+            )
+
+    def _connect_rack_hosts(
+        self,
+        rack: RackGene,
+        host_gateways: list[tuple[str, HostGene]],
+        memory_ids: list[str],
+        switch_ids: list[str],
+        links: list[dict[str, Any]],
+        proposal_links: list[InstantiatedLink],
+    ) -> None:
+        if rack.intra_rack_topology == "none":
+            if host_gateways or memory_ids:
+                raise ValueError(f"rack {rack.rack_id} has disallowed intra_rack_topology=none")
+            return
+        if rack.intra_rack_topology == "switch":
+            if not switch_ids:
+                raise ValueError(f"rack {rack.rack_id} switch topology has no switch")
+            switch_id = switch_ids[0]
+            for gateway_id, host in host_gateways:
+                self._add_link(
+                    links,
+                    proposal_links,
+                    link_id=f"{gateway_id}_to_{switch_id}",
+                    src=gateway_id,
+                    dst=switch_id,
+                    link_type=host.rack_uplink_link_type or rack.intra_rack_link_type,
+                    qty=host.rack_uplink_link_qty or rack.intra_rack_link_qty,
+                    stats_domain=f"rack:{rack.rack_id}",
+                    bidirectional=True,
+                    scope="intra",
+                )
+            for node_id in memory_ids:
+                self._add_link(
+                    links,
+                    proposal_links,
+                    link_id=f"{node_id}_to_{switch_id}",
+                    src=node_id,
+                    dst=switch_id,
+                    link_type=rack.memory_link_type or rack.intra_rack_link_type,
+                    qty=rack.memory_link_qty,
+                    stats_domain=f"rack:{rack.rack_id}",
+                    bidirectional=True,
+                    scope="intra",
+                )
+            return
+
+        rack_nodes = [gateway for gateway, _host in host_gateways] + memory_ids
+        if len(rack_nodes) <= 1:
+            return
+        if rack.intra_rack_topology == "fully_connected":
+            pairs = [(src, dst) for idx, src in enumerate(rack_nodes) for dst in rack_nodes[idx + 1 :]]
+        else:
+            pairs = (
+                [(rack_nodes[0], rack_nodes[1])]
+                if len(rack_nodes) == 2
+                else [(src, rack_nodes[(idx + 1) % len(rack_nodes)]) for idx, src in enumerate(rack_nodes)]
+            )
+        for src, dst in pairs:
+            self._add_link(
+                links,
+                proposal_links,
+                link_id=f"{src}_to_{dst}",
+                src=src,
+                dst=dst,
+                link_type=rack.intra_rack_link_type,
+                qty=rack.intra_rack_link_qty,
+                stats_domain=f"rack:{rack.rack_id}",
+                bidirectional=True,
+                scope="intra",
+            )
+
     def _connect_racks(
         self,
         chromosome: Chromosome,
@@ -449,6 +700,9 @@ class HardwareTopologyExporter:
             return memory_ids[0]
         return None
 
+    def _host_group_id(self, rack_id: str, host_id: str) -> str:
+        return f"{rack_id}_{host_id}"
+
     def _rack_power(self, rack: RackGene) -> float:
         return sum(
             count * self._library.node_types[type_name].tdp_watts
@@ -463,6 +717,32 @@ class HardwareTopologyExporter:
         return node_cost + self._rack_local_link_cost(rack)
 
     def _rack_local_link_cost(self, rack: RackGene) -> float:
+        if rack.hosts:
+            host_cost = sum(self._host_local_link_cost(host) for host in rack.occupied_hosts)
+            if rack.intra_rack_topology == "none":
+                return host_cost
+            if rack.intra_rack_topology == "switch":
+                uplink_cost = sum(
+                    self._link_cost(host.rack_uplink_link_type or rack.intra_rack_link_type, host.rack_uplink_link_qty)
+                    for host in rack.occupied_hosts
+                )
+                memory_cost = 0.0
+                if rack.memory_pool_count:
+                    memory_cost = rack.memory_pool_count * self._link_cost(
+                        rack.memory_link_type or rack.intra_rack_link_type,
+                        rack.memory_link_qty,
+                    )
+                return host_cost + uplink_cost + memory_cost
+
+            node_count = len(rack.occupied_hosts) + rack.memory_pool_count
+            if node_count <= 1:
+                return host_cost
+            if rack.intra_rack_topology == "fully_connected":
+                pair_count = node_count * (node_count - 1) // 2
+            else:
+                pair_count = 1 if node_count == 2 else node_count
+            return host_cost + pair_count * self._link_cost(rack.intra_rack_link_type, rack.intra_rack_link_qty)
+
         if rack.intra_rack_topology == "none":
             return 0.0
         if rack.intra_rack_topology == "switch":
@@ -492,6 +772,18 @@ class HardwareTopologyExporter:
             return 0.0
         return self._library.link_types[link_type].cost_unit * qty
 
+    def _host_local_link_cost(self, host: HostGene) -> float:
+        node_count = len(host.occupied_slots)
+        if node_count <= 1:
+            return 0.0 if host.host_topology != "switch" else node_count * self._link_cost(host.host_link_type, host.host_link_qty)
+        if host.host_topology == "switch":
+            return node_count * self._link_cost(host.host_link_type, host.host_link_qty)
+        if host.host_topology == "fully_connected":
+            pair_count = node_count * (node_count - 1) // 2
+        else:
+            pair_count = 1 if node_count == 2 else node_count
+        return pair_count * self._link_cost(host.host_link_type, host.host_link_qty)
+
     def _rack_units(self, rack: RackGene) -> float:
         return sum(
             count * self._library.node_types[type_name].rack_units
@@ -503,6 +795,9 @@ class HardwareTopologyExporter:
         for slot in rack.occupied_slots:
             if slot.node_type:
                 counts[slot.node_type] = counts.get(slot.node_type, 0) + 1
+        for host in rack.occupied_hosts:
+            if host.host_switch_type:
+                counts[host.host_switch_type] = counts.get(host.host_switch_type, 0) + 1
         if rack.memory_pool_type and rack.memory_pool_count:
             counts[rack.memory_pool_type] = counts.get(rack.memory_pool_type, 0) + rack.memory_pool_count
         if rack.switch_type and rack.switch_count:

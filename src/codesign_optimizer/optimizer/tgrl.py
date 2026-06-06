@@ -16,6 +16,7 @@ from codesign_optimizer.io.jsonc import dump_json, load_jsonc
 from codesign_optimizer.models.hardware import ComponentLibrary, NodeTypeSpec
 from codesign_optimizer.optimizer.chromosome import (
     Chromosome,
+    HostGene,
     RackGene,
     chromosome_from_template,
     infer_type_pools,
@@ -36,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 
 ActionType = Literal[
+    "add_host_to_bay",
+    "remove_host_from_bay",
+    "replace_host_template",
     "add_node_to_slot",
     "remove_node_from_slot",
     "replace_node_type",
@@ -67,6 +71,9 @@ class TGRLConfig(BaseModel):
 
 
 TOPOLOGY_CHANGING_ACTION_TYPES: set[ActionType] = {
+    "add_host_to_bay",
+    "remove_host_from_bay",
+    "replace_host_template",
     "add_node_to_slot",
     "remove_node_from_slot",
     "change_intra_rack_topology",
@@ -467,7 +474,9 @@ class TGRLSearchRunner:
     def _initial_chromosome(self) -> Chromosome:
         if not self._space.templates:
             raise ValueError("search space must contain at least one template")
-        report = self._repairer.repair_and_validate(chromosome_from_template(self._space.templates[0]))
+        report = self._repairer.repair_and_validate(
+            chromosome_from_template(self._space.templates[0], host_templates=self._space.host_template_map())
+        )
         return report.chromosome
 
     def _evaluate_initial(self, chromosome: Chromosome, episode: int) -> TGRLEvaluation:
@@ -825,6 +834,9 @@ def enumerate_graph_edit_actions(
     component_library: ComponentLibrary,
     search_space: SearchSpace,
 ) -> list[GraphEditAction]:
+    if search_space.mutation.search_granularity == "host":
+        return _unique_actions(_enumerate_host_graph_edit_actions(chromosome, search_space=search_space))
+
     pools = infer_type_pools(search_space, component_library.node_types, component_library.link_types)
     intra_link_order = ordered_link_types_for_scope(component_library, "intra")
     inter_link_order = ordered_link_types_for_scope(component_library, "inter")
@@ -902,6 +914,48 @@ def enumerate_graph_edit_actions(
     return _unique_actions(actions)
 
 
+def _enumerate_host_graph_edit_actions(
+    chromosome: Chromosome,
+    *,
+    search_space: SearchSpace,
+) -> list[GraphEditAction]:
+    actions: list[GraphEditAction] = []
+    template_ids = [template.template_id for template in search_space.host_templates]
+    for archetype in search_space.rack_archetypes:
+        actions.append(GraphEditAction("add_rack_from_template", target=archetype.name))
+    for rack in chromosome.racks:
+        if rack.optional and not rack.active:
+            continue
+        if rack.dynamic or rack.optional or (
+            rack.origin == "seed" and search_space.mutation.allow_remove_initial_racks
+        ):
+            actions.append(GraphEditAction("remove_rack", rack_id=rack.rack_id))
+        for host in rack.hosts:
+            if host.template_id:
+                actions.append(GraphEditAction("remove_host_from_bay", rack_id=rack.rack_id, resource=host.host_id))
+                for template_id in template_ids:
+                    if template_id != host.template_id:
+                        actions.append(
+                            GraphEditAction(
+                                "replace_host_template",
+                                rack_id=rack.rack_id,
+                                resource=host.host_id,
+                                target=template_id,
+                            )
+                        )
+            else:
+                for template_id in template_ids:
+                    actions.append(
+                        GraphEditAction(
+                            "add_host_to_bay",
+                            rack_id=rack.rack_id,
+                            resource=host.host_id,
+                            target=template_id,
+                        )
+                    )
+    return actions
+
+
 def build_masked_actions(
     chromosome: Chromosome,
     *,
@@ -977,6 +1031,19 @@ def _action_allowed_by_config(
     search_space: SearchSpace,
     config: TGRLConfig,
 ) -> bool:
+    if search_space.mutation.search_granularity == "host":
+        if action.action_type not in {
+            "add_host_to_bay",
+            "remove_host_from_bay",
+            "replace_host_template",
+            "add_rack_from_template",
+            "remove_rack",
+        }:
+            return False
+        if action.action_type == "remove_host_from_bay" and not config.allow_empty_slots:
+            return False
+        return not config.freeze_topology
+
     if action.action_type in TOPOLOGY_CHANGING_ACTION_TYPES:
         if config.freeze_topology:
             return False
@@ -1042,11 +1109,28 @@ def apply_graph_edit_action(
 ) -> Chromosome:
     result = chromosome.model_copy(deep=True)
     rack = _find_rack(result, action.rack_id) if action.rack_id else None
+    if action.action_type in {"add_host_to_bay", "replace_host_template"} and rack is not None and search_space is not None:
+        host = _find_host(rack, action.resource)
+        template = search_space.host_template_map().get(action.target)
+        if host is not None and template is not None:
+            _replace_host(host, HostGene.from_template(host.host_id, template))
+        return result
+    if action.action_type == "remove_host_from_bay" and rack is not None:
+        host = _find_host(rack, action.resource)
+        if host is not None:
+            host.clear()
+        return result
     if action.action_type == "add_rack_from_template" and search_space is not None:
         archetype = _find_rack_archetype(search_space, action.target)
         if archetype is None:
             return result
-        result.racks.append(rack_gene_from_archetype(archetype, _next_dynamic_rack_id(result, archetype.name)))
+        result.racks.append(
+            rack_gene_from_archetype(
+                archetype,
+                _next_dynamic_rack_id(result, archetype.name),
+                host_templates=search_space.host_template_map(),
+            )
+        )
         if result.inter_rack == "none" and len([item for item in result.racks if item.active or not item.optional]) > 1:
             result.inter_rack = "ring"
         return result
@@ -1071,6 +1155,8 @@ def apply_graph_edit_action(
             slot.node_type = None
             slot.link_type = None
             slot.link_qty = None
+        for host in rack.hosts:
+            host.clear()
         rack.memory_pool_count = 0
         rack.switch_count = 0
         return result
@@ -1143,6 +1229,15 @@ def heuristic_action_score(
             score += 0.5
     elif action.action_type in {"replace_node_type", "upgrade_node", "downgrade_node"} and rack is not None:
         score += _slot_type_mutation_score(rack, action, component_library, context)
+    elif action.action_type == "add_host_to_bay":
+        score += max(0.0, context.compute_utilization - 0.60) * 3.5
+        score -= context.constraint_pressure
+    elif action.action_type == "remove_host_from_bay":
+        score += context.constraint_pressure * 2.5
+        if context.compute_utilization < 0.25:
+            score += 0.5
+    elif action.action_type == "replace_host_template" and rack is not None:
+        score += _host_template_mutation_score(rack, action, component_library, context)
     elif action.action_type == "upgrade_intra_rack_link":
         score += max(0.0, network_pressure) * (3.0 if domain_hit else 1.0)
         score -= context.constraint_pressure * 0.3
@@ -1205,10 +1300,11 @@ def action_features(
 ) -> dict[str, float]:
     rack = _find_rack(chromosome, action.rack_id) if action.rack_id else None
     slot = _find_slot(rack, action.resource) if rack is not None else None
+    host = _find_host(rack, action.resource) if rack is not None else None
     features: dict[str, float] = {
         "bias": 1.0,
         f"type:{action.action_type}": 1.0,
-        f"resource:{'slot' if slot is not None else action.resource or 'none'}": 1.0,
+        f"resource:{'host' if host is not None else 'slot' if slot is not None else action.resource or 'none'}": 1.0,
         "compute_utilization": context.compute_utilization,
         "network_utilization": context.network_utilization,
         "queue_pressure": context.queue_pressure,
@@ -1222,7 +1318,10 @@ def action_features(
         features["domain_hit"] = 1.0 if rack.rack_id in context.top_domain else 0.0
         features["rack_occupied_slots"] = len(rack.occupied_slots) / max(1.0, rack.max_slots)
         features["rack_free_slots"] = len(rack.free_slots) / max(1.0, rack.max_slots)
+        features["rack_occupied_hosts"] = len(rack.occupied_hosts) / max(1.0, float(rack.max_hosts or len(rack.hosts) or 1))
+        features["rack_free_hosts"] = len(rack.free_hosts) / max(1.0, float(rack.max_hosts or len(rack.hosts) or 1))
         features["slot_occupied"] = 1.0 if slot and slot.node_type else 0.0
+        features["host_occupied"] = 1.0 if host and host.template_id else 0.0
         features["rack_memory_count"] = rack.memory_pool_count / 8.0
     return features
 
@@ -1307,6 +1406,21 @@ def _slot_type_mutation_score(
     return score
 
 
+def _host_template_mutation_score(
+    rack: RackGene,
+    action: GraphEditAction,
+    library: ComponentLibrary,
+    context: TelemetryContext,
+) -> float:
+    host = _find_host(rack, action.resource)
+    if host is None or not host.template_id:
+        return 0.0
+    score = max(0.0, context.compute_utilization - 0.60) * 2.0
+    if context.constraint_pressure > 0:
+        score += 0.3
+    return score
+
+
 def _average_compute_utilization(feedback: ParsedPipelineFeedback | None) -> float:
     if feedback is None or not feedback.simulation_feedback.compute_profile:
         return 0.0
@@ -1345,7 +1459,31 @@ def _find_slot(rack: RackGene | None, slot_id: str) -> Any | None:
     for slot in rack.slots:
         if slot.slot_id == slot_id:
             return slot
+    for host in rack.hosts:
+        for slot in host.slots:
+            if slot.slot_id == slot_id:
+                return slot
     return None
+
+
+def _find_host(rack: RackGene | None, host_id: str) -> HostGene | None:
+    if rack is None:
+        return None
+    for host in rack.hosts:
+        if host.host_id == host_id:
+            return host
+    return None
+
+
+def _replace_host(target: HostGene, source: HostGene) -> None:
+    target.template_id = source.template_id
+    target.slots = [slot.model_copy(deep=True) for slot in source.slots]
+    target.host_topology = source.host_topology
+    target.host_switch_type = source.host_switch_type
+    target.host_link_type = source.host_link_type
+    target.host_link_qty = source.host_link_qty
+    target.rack_uplink_link_type = source.rack_uplink_link_type
+    target.rack_uplink_link_qty = source.rack_uplink_link_qty
 
 
 def _find_rack_archetype(search_space: SearchSpace, name: str) -> Any | None:

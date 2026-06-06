@@ -8,6 +8,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from codesign_optimizer.optimizer.search_space import (
+    HostSpec,
+    HostTemplateSpec,
     RackArchetype,
     RackCapacityLimits,
     RackSpec,
@@ -24,15 +26,76 @@ class SlotGene(BaseModel):
     node_type: str | None = None
     link_type: str | None = None
     link_qty: int | None = Field(default=None, ge=1)
+    host_id: str | None = None
 
     @classmethod
-    def from_spec(cls, slot: SlotSpec) -> "SlotGene":
+    def from_spec(cls, slot: SlotSpec, *, host_id: str | None = None) -> "SlotGene":
         return cls(
             slot_id=slot.slot_id,
             node_type=slot.node_type,
             link_type=slot.link_type,
             link_qty=slot.link_qty,
+            host_id=host_id,
         )
+
+
+class HostGene(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    host_id: str
+    template_id: str | None = None
+    slots: list[SlotGene] = Field(default_factory=list)
+    host_topology: str = "switch"
+    host_switch_type: str | None = None
+    host_link_type: str | None = None
+    host_link_qty: int = Field(default=1, ge=1)
+    rack_uplink_link_type: str | None = None
+    rack_uplink_link_qty: int = Field(default=1, ge=1)
+
+    @property
+    def occupied_slots(self) -> list[SlotGene]:
+        return [slot for slot in self.slots if slot.node_type]
+
+    @property
+    def is_occupied(self) -> bool:
+        return self.template_id is not None and bool(self.occupied_slots)
+
+    @classmethod
+    def from_spec(
+        cls,
+        host: HostSpec,
+        host_templates: dict[str, HostTemplateSpec] | None,
+    ) -> "HostGene":
+        if host.template_id is None:
+            return cls(host_id=host.host_id)
+        if host_templates is None or host.template_id not in host_templates:
+            raise ValueError(f"unknown host template {host.template_id}")
+        template = host_templates[host.template_id]
+        return cls.from_template(host.host_id, template)
+
+    @classmethod
+    def from_template(cls, host_id: str, template: HostTemplateSpec) -> "HostGene":
+        return cls(
+            host_id=host_id,
+            template_id=template.template_id,
+            slots=[SlotGene.from_spec(slot, host_id=host_id) for slot in template.slots],
+            host_topology=template.host_topology,
+            host_switch_type=template.host_switch_type,
+            host_link_type=template.host_link_type,
+            host_link_qty=template.host_link_qty,
+            rack_uplink_link_type=template.rack_uplink_link_type,
+            rack_uplink_link_qty=template.rack_uplink_link_qty,
+        )
+
+    def clear(self) -> None:
+        self.template_id = None
+        self.slots = []
+        self.host_topology = "switch"
+        self.host_switch_type = None
+        self.host_link_type = None
+        self.host_link_qty = 1
+        self.rack_uplink_link_type = None
+        self.rack_uplink_link_qty = 1
 
 
 class RackGene(BaseModel):
@@ -47,6 +110,8 @@ class RackGene(BaseModel):
     activation_alpha: float | None = Field(default=None, ge=0)
     max_slots: int = Field(ge=0)
     slots: list[SlotGene] = Field(default_factory=list)
+    max_hosts: int | None = Field(default=None, ge=0)
+    hosts: list[HostGene] = Field(default_factory=list)
     memory_pool_count: int = Field(default=0, ge=0)
     switch_count: int = Field(default=1, ge=0)
     memory_pool_type: str | None = None
@@ -60,11 +125,22 @@ class RackGene(BaseModel):
 
     @property
     def occupied_slots(self) -> list[SlotGene]:
-        return [slot for slot in self.slots if slot.node_type]
+        slots = [slot for slot in self.slots if slot.node_type]
+        for host in self.occupied_hosts:
+            slots.extend(host.occupied_slots)
+        return slots
 
     @property
     def free_slots(self) -> list[SlotGene]:
         return [slot for slot in self.slots if not slot.node_type]
+
+    @property
+    def occupied_hosts(self) -> list[HostGene]:
+        return [host for host in self.hosts if host.is_occupied]
+
+    @property
+    def free_hosts(self) -> list[HostGene]:
+        return [host for host in self.hosts if not host.template_id]
 
     @property
     def gpu_count(self) -> int:
@@ -273,6 +349,17 @@ def infer_type_pools(space: SearchSpace, node_types: dict[str, Any], link_types:
             memory,
             switch,
         )
+    for host_template in space.host_templates:
+        for slot in host_template.slots:
+            if not slot.node_type:
+                continue
+            role = role_of_type(slot.node_type, None)
+            if role == "cpu":
+                cpu.append(slot.node_type)
+            elif role == "gpu":
+                gpu.append(slot.node_type)
+        if host_template.host_switch_type:
+            switch.append(host_template.host_switch_type)
 
     return TypePools(
         gpu=sorted(set(gpu)),
@@ -283,11 +370,15 @@ def infer_type_pools(space: SearchSpace, node_types: dict[str, Any], link_types:
     )
 
 
-def chromosome_from_template(template: RackTemplate) -> Chromosome:
+def chromosome_from_template(
+    template: RackTemplate,
+    *,
+    host_templates: dict[str, HostTemplateSpec] | None = None,
+) -> Chromosome:
     return _sanitize_topologies(
         Chromosome(
             template_name=template.name,
-            racks=[_rack_gene_from_spec(rack, dynamic=False) for rack in template.racks],
+            racks=[_rack_gene_from_spec(rack, dynamic=False, host_templates=host_templates) for rack in template.racks],
             inter_rack=template.inter_rack,
             inter_rack_link_type=template.inter_rack_link_type,
             inter_rack_link_qty=template.inter_rack_link_qty,
@@ -295,8 +386,17 @@ def chromosome_from_template(template: RackTemplate) -> Chromosome:
     )
 
 
-def rack_gene_from_archetype(archetype: RackArchetype, rack_id: str) -> RackGene:
-    rack = _rack_gene_from_spec(archetype.to_rack_spec(rack_id, origin="dynamic"), dynamic=True)
+def rack_gene_from_archetype(
+    archetype: RackArchetype,
+    rack_id: str,
+    *,
+    host_templates: dict[str, HostTemplateSpec] | None = None,
+) -> RackGene:
+    rack = _rack_gene_from_spec(
+        archetype.to_rack_spec(rack_id, origin="dynamic"),
+        dynamic=True,
+        host_templates=host_templates,
+    )
     rack.optional = False
     rack.active = True
     rack.origin = "dynamic"
@@ -325,7 +425,7 @@ def _sanitize_rack_topology(rack: RackGene) -> None:
 
 
 def initial_population(space: SearchSpace, population_size: int, rng: random.Random) -> list[Chromosome]:
-    base = [chromosome_from_template(template) for template in space.templates]
+    base = [chromosome_from_template(template, host_templates=space.host_template_map()) for template in space.templates]
     if not base:
         return []
     population: list[Chromosome] = []
@@ -412,7 +512,12 @@ def crossover(left: Chromosome, right: Chromosome, rng: random.Random) -> Chromo
     return _sanitize_topologies(child)
 
 
-def _rack_gene_from_spec(rack: RackSpec, *, dynamic: bool) -> RackGene:
+def _rack_gene_from_spec(
+    rack: RackSpec,
+    *,
+    dynamic: bool,
+    host_templates: dict[str, HostTemplateSpec] | None = None,
+) -> RackGene:
     return RackGene(
         rack_id=rack.rack_id,
         role=rack.role,
@@ -423,6 +528,8 @@ def _rack_gene_from_spec(rack: RackSpec, *, dynamic: bool) -> RackGene:
         activation_alpha=rack.activation_alpha,
         max_slots=rack.max_slots,
         slots=[SlotGene.from_spec(slot) for slot in rack.slots],
+        max_hosts=rack.max_hosts,
+        hosts=[HostGene.from_spec(host, host_templates) for host in rack.hosts],
         memory_pool_count=rack.memory_pool_count,
         switch_count=rack.switch_count,
         memory_pool_type=rack.memory_pool_type,
@@ -467,6 +574,17 @@ def _type_pools_from_space(space: SearchSpace) -> TypePools:
             _add_rack_types_to_pools(rack, gpu, cpu, memory, switch)
     for archetype in space.rack_archetypes:
         _add_rack_types_to_pools(archetype.to_rack_spec(archetype.name), gpu, cpu, memory, switch)
+    for template in space.host_templates:
+        for slot in template.slots:
+            if not slot.node_type:
+                continue
+            role = role_of_type(slot.node_type, None)
+            if role == "cpu":
+                cpu.append(slot.node_type)
+            elif role == "gpu":
+                gpu.append(slot.node_type)
+        if template.host_switch_type:
+            switch.append(template.host_switch_type)
     return TypePools(sorted(set(gpu)), sorted(set(cpu)), sorted(set(memory)), sorted(set(switch)), [])
 
 
