@@ -161,6 +161,7 @@ class HostTemplateSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     template_id: str
+    rack_units: float = Field(default=1.0, ge=0)
     slots: list[SlotSpec] = Field(default_factory=list)
     host_topology: FabricMode = "switch"
     host_switch_type: str | None = None
@@ -371,21 +372,34 @@ class SearchSpace(BaseModel):
         template_ids = [item.template_id for item in self.host_templates]
         if len(template_ids) != len(set(template_ids)):
             raise ValueError("host_templates must have unique template_id")
+        host_templates = self.host_template_map()
         host_template_ids = set(template_ids)
         if self.mutation.search_granularity == "host" and not host_template_ids:
             raise ValueError("host search_granularity requires host_templates")
         for rack in _all_rack_specs(self):
             fixed_rank_slots = 0
+            fixed_host_units = 0.0
             for host in rack.hosts:
                 if host.template_id is not None and host.template_id not in host_template_ids:
                     raise ValueError(f"rack {rack.rack_id} references unknown host template {host.template_id}")
                 if host.template_id is not None:
-                    template = self.host_template_map()[host.template_id]
+                    template = host_templates[host.template_id]
                     fixed_rank_slots += sum(1 for slot in template.slots if slot.node_type)
+                    fixed_host_units += template.rack_units
             if rack.hosts and rack.max_slots == 0 and fixed_rank_slots > 0:
                 rack.max_slots = fixed_rank_slots
                 if rack.limits.max_slots == 0:
                     rack.limits.max_slots = fixed_rank_slots
+            rack_unit_limit = (
+                rack.limits.max_rack_units
+                if rack.limits.max_rack_units is not None
+                else self.limits.max_rack_units
+            )
+            if rack.hosts and fixed_host_units > rack_unit_limit:
+                raise ValueError(
+                    f"rack {rack.rack_id} host rack_units exceed limit: "
+                    f"{fixed_host_units:.3f} > {rack_unit_limit:.3f}"
+                )
         return self
 
     def host_template_map(self) -> dict[str, HostTemplateSpec]:

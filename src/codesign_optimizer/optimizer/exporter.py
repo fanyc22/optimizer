@@ -86,6 +86,7 @@ class HardwareTopologyExporter:
                             "attrs": {
                                 "host_id": host.host_id,
                                 "template_id": host.template_id,
+                                "rack_units": host.rack_units,
                                 "host_topology": host.host_topology,
                             },
                         }
@@ -258,6 +259,7 @@ class HardwareTopologyExporter:
                     "slot_id": slot.slot_id,
                     "host_id": host.host_id,
                     "host_template_id": host.template_id,
+                    "host_rack_units": host.rack_units,
                     "node_type": slot.node_type,
                 },
             )
@@ -785,6 +787,13 @@ class HardwareTopologyExporter:
         return pair_count * self._link_cost(host.host_link_type, host.host_link_qty)
 
     def _rack_units(self, rack: RackGene) -> float:
+        if rack.hosts:
+            units = sum(host.rack_units for host in rack.occupied_hosts)
+            if rack.memory_pool_type and rack.memory_pool_count:
+                units += rack.memory_pool_count * self._library.node_types[rack.memory_pool_type].rack_units
+            if rack.switch_type and rack.switch_count:
+                units += rack.switch_count * self._library.node_types[rack.switch_type].rack_units
+            return units
         return sum(
             count * self._library.node_types[type_name].rack_units
             for type_name, count in self._rack_type_counts(rack)

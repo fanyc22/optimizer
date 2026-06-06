@@ -302,12 +302,11 @@ class CandidateRepairer:
             )
             rack_power = 0.0
             rack_cost = 0.0
-            rack_units = 0.0
             for type_name, count in self._rack_type_counts(rack):
                 spec = self._library.node_types[type_name]
                 rack_cost += spec.cost_unit * count
                 rack_power += spec.tdp_watts * count
-                rack_units += spec.rack_units * count
+            rack_units = self._rack_units(rack)
             rack_cost += self._rack_local_link_cost(rack)
             rack_cost_limit = (
                 rack.limits.max_cost
@@ -416,6 +415,19 @@ class CandidateRepairer:
             pair_count = 1 if node_count == 2 else node_count
         return pair_count * self._link_cost(getattr(host, "host_link_type", None), getattr(host, "host_link_qty", 1))
 
+    def _rack_units(self, rack: RackGene) -> float:
+        if rack.hosts:
+            units = sum(host.rack_units for host in rack.occupied_hosts)
+            if rack.memory_pool_type and rack.memory_pool_count and rack.memory_pool_type in self._library.node_types:
+                units += self._library.node_types[rack.memory_pool_type].rack_units * rack.memory_pool_count
+            if rack.switch_type and rack.switch_count and rack.switch_type in self._library.node_types:
+                units += self._library.node_types[rack.switch_type].rack_units * rack.switch_count
+            return units
+        return sum(
+            count * self._library.node_types[type_name].rack_units
+            for type_name, count in self._rack_type_counts(rack)
+        )
+
     def _check_rack_device_limits(
         self,
         rack: RackGene,
@@ -424,21 +436,22 @@ class CandidateRepairer:
         penalty: float,
         messages: list[str],
     ) -> tuple[bool, float]:
-        max_slots = rack.limits.max_slots if rack.limits.max_slots is not None else rack.max_slots
-        if rack.max_slots > max_slots:
-            feasible = False
-            penalty += (rack.max_slots - max_slots) * 1000.0
-            messages.append(f"{rack.rack_id} max_slots exceeds limit: {rack.max_slots} > {max_slots}")
-        if len(rack.slots) > rack.max_slots:
-            feasible = False
-            penalty += (len(rack.slots) - rack.max_slots) * 1000.0
-            messages.append(f"{rack.rack_id} slot count exceeds max_slots: {len(rack.slots)} > {rack.max_slots}")
-        if len(rack.occupied_slots) > rack.max_slots:
-            feasible = False
-            penalty += (len(rack.occupied_slots) - rack.max_slots) * 1000.0
-            messages.append(
-                f"{rack.rack_id} occupied slots exceeds max_slots: {len(rack.occupied_slots)} > {rack.max_slots}"
-            )
+        if not rack.hosts:
+            max_slots = rack.limits.max_slots if rack.limits.max_slots is not None else rack.max_slots
+            if rack.max_slots > max_slots:
+                feasible = False
+                penalty += (rack.max_slots - max_slots) * 1000.0
+                messages.append(f"{rack.rack_id} max_slots exceeds limit: {rack.max_slots} > {max_slots}")
+            if len(rack.slots) > rack.max_slots:
+                feasible = False
+                penalty += (len(rack.slots) - rack.max_slots) * 1000.0
+                messages.append(f"{rack.rack_id} slot count exceeds max_slots: {len(rack.slots)} > {rack.max_slots}")
+            if len(rack.occupied_slots) > rack.max_slots:
+                feasible = False
+                penalty += (len(rack.occupied_slots) - rack.max_slots) * 1000.0
+                messages.append(
+                    f"{rack.rack_id} occupied slots exceeds max_slots: {len(rack.occupied_slots)} > {rack.max_slots}"
+                )
         if rack.max_hosts is not None and len(rack.hosts) > rack.max_hosts:
             feasible = False
             penalty += (len(rack.hosts) - rack.max_hosts) * 1000.0

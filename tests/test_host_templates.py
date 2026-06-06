@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from codesign_optimizer.models.hardware import ComponentLibrary
 from codesign_optimizer.optimizer.chromosome import chromosome_from_template
 from codesign_optimizer.optimizer.exporter import HardwareTopologyExporter
@@ -9,6 +11,7 @@ from codesign_optimizer.optimizer.search_space import SearchSpace
 from codesign_optimizer.optimizer.tgrl import (
     apply_graph_edit_action,
     enumerate_graph_edit_actions,
+    GraphEditAction,
 )
 
 
@@ -35,6 +38,8 @@ def test_host_template_search_space_parses_and_legacy_slots_still_parse() -> Non
         "nvlink_2cpu_8gpu_host",
         "cpu_2socket_host",
     }
+    assert space.host_template_map()["pcie_2cpu_4gpu_host"].rack_units == 4
+    assert space.host_template_map()["nvlink_2cpu_8gpu_host"].rack_units == 8
 
     legacy = SearchSpace.model_validate(
         {
@@ -61,6 +66,13 @@ def test_host_template_search_space_parses_and_legacy_slots_still_parse() -> Non
     assert legacy.templates[0].racks[0].slots[0].slot_id == "gpu0"
     assert legacy.mutation.search_granularity == "slot"
 
+    oversized = _load_json(ROOT / "examples" / "search_space_host_template_tgrl.json")
+    oversized.pop("limits")
+    oversized["templates"][0]["racks"][0]["limits"].pop("max_rack_units")
+    oversized["host_templates"][0]["rack_units"] = 41
+    with pytest.raises(ValueError, match="host rack_units exceed limit"):
+        SearchSpace.model_validate(oversized)
+
 
 def test_exporter_lowers_hosts_to_l2_groups_and_links() -> None:
     library = _library()
@@ -72,6 +84,8 @@ def test_exporter_lowers_hosts_to_l2_groups_and_links() -> None:
     group_ids = {group["id"]: group for group in topology["hierarchy"]["groups"]}
     assert group_ids["rack0_host0"]["level"] == "L2"
     assert group_ids["rack0_host2"]["parent"] == "rack0"
+    assert group_ids["rack0"]["attrs"]["rack_units"] == 7
+    assert group_ids["rack0_host0"]["attrs"]["rack_units"] == 4
     assert exported.rank_count == 8
     assert topology["rank_map"][0]["node_id"] == "rack0_host0_cpu0"
 
@@ -125,6 +139,65 @@ def test_tgrl_host_mode_only_enumerates_and_applies_host_actions() -> None:
 
     exported = HardwareTopologyExporter(library).export(updated)
     assert exported.rank_count == 18
+
+
+def test_tgrl_host_mode_filters_host_actions_by_rack_units() -> None:
+    library = _library()
+    payload = _load_json(ROOT / "examples" / "search_space_host_template_tgrl.json")
+    payload["templates"][0]["racks"][0]["limits"]["max_rack_units"] = 14
+    space = SearchSpace.model_validate(payload)
+    chromosome = chromosome_from_template(space.templates[0], host_templates=space.host_template_map())
+
+    actions = enumerate_graph_edit_actions(chromosome, component_library=library, search_space=space)
+
+    assert not any(
+        action.action_type == "add_host_to_bay"
+        and action.resource == "host1"
+        and action.target == "nvlink_2cpu_8gpu_host"
+        for action in actions
+    )
+    assert any(
+        action.action_type == "add_host_to_bay"
+        and action.resource == "host1"
+        and action.target == "pcie_2cpu_4gpu_host"
+        for action in actions
+    )
+
+    forced = apply_graph_edit_action(
+        chromosome,
+        GraphEditAction(
+            "add_host_to_bay",
+            rack_id="rack0",
+            resource="host1",
+            target="nvlink_2cpu_8gpu_host",
+        ),
+        search_space=space,
+    )
+    repair = CandidateRepairer(library, space).repair_and_validate(forced)
+    assert not repair.feasible
+    assert any("rack units exceed limit" in message for message in repair.messages)
+
+
+def test_host_rack_unit_capacity_replaces_rank_slot_limit() -> None:
+    library = _library()
+    payload = _load_json(ROOT / "examples" / "search_space_host_template_tgrl.json")
+    payload["templates"][0]["racks"][0]["max_slots"] = 8
+    payload["templates"][0]["racks"][0]["limits"]["max_slots"] = 8
+    space = SearchSpace.model_validate(payload)
+    chromosome = chromosome_from_template(space.templates[0], host_templates=space.host_template_map())
+
+    action = next(
+        action
+        for action in enumerate_graph_edit_actions(chromosome, component_library=library, search_space=space)
+        if action.action_type == "add_host_to_bay"
+        and action.resource == "host1"
+        and action.target == "nvlink_2cpu_8gpu_host"
+    )
+    updated = apply_graph_edit_action(chromosome, action, search_space=space)
+
+    assert len(updated.racks[0].occupied_slots) == 18
+    repair = CandidateRepairer(library, space).repair_and_validate(updated)
+    assert repair.feasible, repair.messages
 
 
 def test_tgrl_host_mode_can_add_and_remove_dynamic_rack_from_template() -> None:

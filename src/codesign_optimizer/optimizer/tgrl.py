@@ -835,7 +835,13 @@ def enumerate_graph_edit_actions(
     search_space: SearchSpace,
 ) -> list[GraphEditAction]:
     if search_space.mutation.search_granularity == "host":
-        return _unique_actions(_enumerate_host_graph_edit_actions(chromosome, search_space=search_space))
+        return _unique_actions(
+            _enumerate_host_graph_edit_actions(
+                chromosome,
+                component_library=component_library,
+                search_space=search_space,
+            )
+        )
 
     pools = infer_type_pools(search_space, component_library.node_types, component_library.link_types)
     intra_link_order = ordered_link_types_for_scope(component_library, "intra")
@@ -917,10 +923,11 @@ def enumerate_graph_edit_actions(
 def _enumerate_host_graph_edit_actions(
     chromosome: Chromosome,
     *,
+    component_library: ComponentLibrary,
     search_space: SearchSpace,
 ) -> list[GraphEditAction]:
     actions: list[GraphEditAction] = []
-    template_ids = [template.template_id for template in search_space.host_templates]
+    host_templates = search_space.host_template_map()
     for archetype in search_space.rack_archetypes:
         actions.append(GraphEditAction("add_rack_from_template", target=archetype.name))
     for rack in chromosome.racks:
@@ -933,8 +940,14 @@ def _enumerate_host_graph_edit_actions(
         for host in rack.hosts:
             if host.template_id:
                 actions.append(GraphEditAction("remove_host_from_bay", rack_id=rack.rack_id, resource=host.host_id))
-                for template_id in template_ids:
-                    if template_id != host.template_id:
+                for template_id, template in host_templates.items():
+                    if template_id != host.template_id and _host_template_fits_rack_units(
+                        rack,
+                        template.rack_units,
+                        component_library=component_library,
+                        search_space=search_space,
+                        replacing_host=host,
+                    ):
                         actions.append(
                             GraphEditAction(
                                 "replace_host_template",
@@ -944,16 +957,48 @@ def _enumerate_host_graph_edit_actions(
                             )
                         )
             else:
-                for template_id in template_ids:
-                    actions.append(
-                        GraphEditAction(
-                            "add_host_to_bay",
-                            rack_id=rack.rack_id,
-                            resource=host.host_id,
-                            target=template_id,
+                for template_id, template in host_templates.items():
+                    if _host_template_fits_rack_units(
+                        rack,
+                        template.rack_units,
+                        component_library=component_library,
+                        search_space=search_space,
+                    ):
+                        actions.append(
+                            GraphEditAction(
+                                "add_host_to_bay",
+                                rack_id=rack.rack_id,
+                                resource=host.host_id,
+                                target=template_id,
+                            )
                         )
-                    )
     return actions
+
+
+def _host_template_fits_rack_units(
+    rack: RackGene,
+    template_units: float,
+    *,
+    component_library: ComponentLibrary,
+    search_space: SearchSpace,
+    replacing_host: HostGene | None = None,
+) -> bool:
+    used_units = _rack_units_for_host_capacity(rack, component_library)
+    if replacing_host is not None:
+        used_units -= replacing_host.rack_units
+    limit = rack.limits.max_rack_units if rack.limits.max_rack_units is not None else search_space.limits.max_rack_units
+    return used_units + template_units <= limit + 1e-9
+
+
+def _rack_units_for_host_capacity(rack: RackGene, component_library: ComponentLibrary) -> float:
+    if not rack.hosts:
+        return 0.0
+    units = sum(host.rack_units for host in rack.occupied_hosts)
+    if rack.memory_pool_type and rack.memory_pool_count and rack.memory_pool_type in component_library.node_types:
+        units += rack.memory_pool_count * component_library.node_types[rack.memory_pool_type].rack_units
+    if rack.switch_type and rack.switch_count and rack.switch_type in component_library.node_types:
+        units += rack.switch_count * component_library.node_types[rack.switch_type].rack_units
+    return units
 
 
 def build_masked_actions(
@@ -1320,8 +1365,12 @@ def action_features(
         features["rack_free_slots"] = len(rack.free_slots) / max(1.0, rack.max_slots)
         features["rack_occupied_hosts"] = len(rack.occupied_hosts) / max(1.0, float(rack.max_hosts or len(rack.hosts) or 1))
         features["rack_free_hosts"] = len(rack.free_hosts) / max(1.0, float(rack.max_hosts or len(rack.hosts) or 1))
+        rack_unit_limit = rack.limits.max_rack_units or 42.0
+        features["rack_occupied_host_units"] = rack.occupied_host_units / max(1.0, rack_unit_limit)
+        features["rack_free_host_units"] = max(0.0, rack_unit_limit - rack.occupied_host_units) / max(1.0, rack_unit_limit)
         features["slot_occupied"] = 1.0 if slot and slot.node_type else 0.0
         features["host_occupied"] = 1.0 if host and host.template_id else 0.0
+        features["host_rack_units"] = (host.rack_units / max(1.0, rack_unit_limit)) if host else 0.0
         features["rack_memory_count"] = rack.memory_pool_count / 8.0
     return features
 
@@ -1477,6 +1526,7 @@ def _find_host(rack: RackGene | None, host_id: str) -> HostGene | None:
 
 def _replace_host(target: HostGene, source: HostGene) -> None:
     target.template_id = source.template_id
+    target.rack_units = source.rack_units
     target.slots = [slot.model_copy(deep=True) for slot in source.slots]
     target.host_topology = source.host_topology
     target.host_switch_type = source.host_switch_type

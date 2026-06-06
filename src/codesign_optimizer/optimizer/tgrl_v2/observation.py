@@ -383,6 +383,13 @@ class GraphObservationBuilder:
         return sum(count * self._library.node_types[type_name].cost_unit for type_name, count in self._rack_type_counts(rack))
 
     def _rack_units(self, rack: RackGene) -> float:
+        if rack.hosts:
+            units = sum(host.rack_units for host in rack.occupied_hosts)
+            if rack.memory_pool_type and rack.memory_pool_count and rack.memory_pool_type in self._library.node_types:
+                units += rack.memory_pool_count * self._library.node_types[rack.memory_pool_type].rack_units
+            if rack.switch_type and rack.switch_count and rack.switch_type in self._library.node_types:
+                units += rack.switch_count * self._library.node_types[rack.switch_type].rack_units
+            return units
         return sum(count * self._library.node_types[type_name].rack_units for type_name, count in self._rack_type_counts(rack))
 
     def _rack_type_counts(self, rack: RackGene) -> list[tuple[str, int]]:

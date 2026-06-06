@@ -3,6 +3,7 @@
   "host_templates": [
     {
       "template_id": "pcie_2cpu_4gpu_host",
+      "rack_units": 4,
       "slots": [
         {"slot_id": "cpu0", "node_type": "CPU_HIGH_BW_96C"},
         {"slot_id": "cpu1", "node_type": "CPU_HIGH_BW_96C"},
@@ -20,6 +21,7 @@
     },
     {
       "template_id": "nvlink_2cpu_8gpu_host",
+      "rack_units": 8,
       "slots": [
         {"slot_id": "cpu0", "node_type": "CPU_HIGH_BW_96C"},
         {"slot_id": "cpu1", "node_type": "CPU_HIGH_BW_96C"},
@@ -41,6 +43,7 @@
     },
     {
       "template_id": "cpu_2socket_host",
+      "rack_units": 2,
       "slots": [
         {"slot_id": "cpu0", "node_type": "CPU_HIGH_BW_96C"},
         {"slot_id": "cpu1", "node_type": "CPU_HIGH_BW_96C"}

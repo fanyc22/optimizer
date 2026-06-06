@@ -44,6 +44,7 @@ class HostGene(BaseModel):
 
     host_id: str
     template_id: str | None = None
+    rack_units: float = Field(default=0.0, ge=0)
     slots: list[SlotGene] = Field(default_factory=list)
     host_topology: str = "switch"
     host_switch_type: str | None = None
@@ -78,6 +79,7 @@ class HostGene(BaseModel):
         return cls(
             host_id=host_id,
             template_id=template.template_id,
+            rack_units=template.rack_units,
             slots=[SlotGene.from_spec(slot, host_id=host_id) for slot in template.slots],
             host_topology=template.host_topology,
             host_switch_type=template.host_switch_type,
@@ -89,6 +91,7 @@ class HostGene(BaseModel):
 
     def clear(self) -> None:
         self.template_id = None
+        self.rack_units = 0.0
         self.slots = []
         self.host_topology = "switch"
         self.host_switch_type = None
@@ -141,6 +144,10 @@ class RackGene(BaseModel):
     @property
     def free_hosts(self) -> list[HostGene]:
         return [host for host in self.hosts if not host.template_id]
+
+    @property
+    def occupied_host_units(self) -> float:
+        return sum(host.rack_units for host in self.occupied_hosts)
 
     @property
     def gpu_count(self) -> int:
