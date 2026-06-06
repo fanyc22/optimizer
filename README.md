@@ -126,6 +126,27 @@ The search does not modify mapper, ET, or simulator semantics. The wrapper
 still projects only rank compute nodes to mapper; switch/router/memory-only
 nodes remain simulator-only explicit graph nodes.
 
+To run every candidate with the continuous calibration fit model, set
+`evaluation.calibration_fit_model` in the search-space JSON. Relative paths are
+resolved from `evaluation.repo_root` when present, otherwise from the repository
+root detected by the optimizer:
+
+```json
+{
+  "evaluation": {
+    "mapper": "heft",
+    "parallel": "auto",
+    "topology_format": "hardware",
+    "calibration_fit_model": "calibration/calibration_fit_model.json"
+  }
+}
+```
+
+The optimizer passes this to `tools/run_mapper_sim_pipeline.py
+--calibration-fit-model`, and the wrapper passes it to simulator as
+`--calibration-fit-model=<abs-path>`. This requires the normal
+`hardware_topology.v2` + congestion-aware analytical simulator path.
+
 To optimize for LLM inference, keep using `--workload` as the path argument but
 point it at a supported LLM `config.json` or model directory, and set
 `evaluation.workload_kind` to `"llm"` in the search-space JSON:

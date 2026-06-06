@@ -76,6 +76,12 @@ class MapperSimulatorPipelineClient:
             cmd.extend(["--workload", str(workload_path)])
         for item in self.evaluation.mapper_extra:
             cmd.extend(["--mapper-extra", item])
+        if self.evaluation.calibration_fit_model is not None:
+            calibration_fit_model = _resolve_repo_relative_path(
+                self.repo_root,
+                self.evaluation.calibration_fit_model,
+            )
+            cmd.extend(["--calibration-fit-model", str(calibration_fit_model)])
         sim_extra = list(self.evaluation.sim_extra)
         if self.evaluation.scaling_report and "--scaling-report=true" not in sim_extra:
             sim_extra.append("--scaling-report=true")
@@ -102,6 +108,13 @@ class MapperSimulatorPipelineClient:
         if self.evaluation.cleanup_wrapper_intermediate:
             _cleanup_large_wrapper_outputs(out_dir)
         return feedback
+
+
+def _resolve_repo_relative_path(repo_root: Path, path: Path) -> Path:
+    path = path.expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (repo_root / path).resolve()
 
 
 def _cleanup_large_wrapper_outputs(out_dir: Path) -> None:

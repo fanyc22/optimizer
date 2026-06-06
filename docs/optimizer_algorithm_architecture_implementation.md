@@ -186,6 +186,7 @@ python3 tools/run_mapper_sim_pipeline.py
   --mapper <mapper>
   --parallel <N>
   --topology-format hardware_topology.v2
+  [--calibration-fit-model <calibration/calibration_fit_model.json>]
 ```
 
 当 `SearchSpace.evaluation.workload_kind == "llm"` 时，`PipelineClient` 把同一个 path 参数改写为：
@@ -204,6 +205,18 @@ python3 tools/run_mapper_sim_pipeline.py
 ```
 
 这样 `search`、`exhaustive`、`tcro`、`tgrl` 和 TG-RL v2 workload suite 都复用同一条 mapper-simulator 评估链路。额外 mapper/simulator 参数由 `SearchSpace.evaluation.mapper_extra` 和 `SearchSpace.evaluation.sim_extra` 透传。
+
+连续校准模型使用 `SearchSpace.evaluation.calibration_fit_model` 配置，推荐写成相对 repo root 的路径：
+
+```json
+{
+  "evaluation": {
+    "calibration_fit_model": "calibration/calibration_fit_model.json"
+  }
+}
+```
+
+`pipeline_client.py` 会把相对路径按 `evaluation.repo_root` 或默认 repo root 解析成绝对路径，并传给 wrapper 的 `--calibration-fit-model`；wrapper 再传给 congestion-aware simulator。这个字段比把同样参数塞进 `sim_extra` 更适合正式搜索，因为 `outputs/run_summary.json` 会记录 `inputs.calibration_fit_model`，后续比较候选结果时能看到使用的是哪份拟合模型。
 
 ## 6. Repair 与约束检查
 

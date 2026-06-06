@@ -105,6 +105,7 @@ class EvaluationSettings(BaseModel):
     llm_dp: int = Field(default=1, ge=1)
     sim_extra: list[str] = Field(default_factory=list)
     mapper_extra: list[str] = Field(default_factory=list)
+    calibration_fit_model: Path | None = None
     scaling_report: bool = False
     cleanup_wrapper_intermediate: bool = True
     timeout_seconds: int | None = Field(default=None, ge=1)

@@ -35,6 +35,7 @@ parser.add_argument("--parallel")
 parser.add_argument("--topology-format")
 parser.add_argument("--mapper-extra", action="append", default=[])
 parser.add_argument("--sim-extra", action="append", default=[])
+parser.add_argument("--calibration-fit-model")
 args = parser.parse_args()
 if bool(args.workload) == bool(args.llm_config):
     raise SystemExit(3)
@@ -57,6 +58,7 @@ summary = {
         "llm_tp": args.llm_tp,
         "topology": args.topology,
         "out": args.out,
+        "calibration_fit_model": args.calibration_fit_model,
     },
     "simulator": {
         "stdout": str(stdout),
@@ -112,6 +114,30 @@ def test_pipeline_client_can_keep_wrapper_outputs(tmp_path: Path) -> None:
 
     assert (out_dir / "intermediate" / "split_json").exists()
     assert (out_dir / "workload").exists()
+
+
+def test_pipeline_client_passes_calibration_fit_model(tmp_path: Path) -> None:
+    repo = _fake_repo(tmp_path)
+    topology = tmp_path / "topology.json"
+    workload = tmp_path / "workload.json"
+    model = repo / "calibration" / "calibration_fit_model.json"
+    topology.write_text("{}", encoding="utf-8")
+    workload.write_text("{}", encoding="utf-8")
+    model.parent.mkdir(parents=True)
+    model.write_text("{}", encoding="utf-8")
+    out_dir = tmp_path / "case_calibration"
+
+    MapperSimulatorPipelineClient(
+        repo_root=repo,
+        evaluation=EvaluationSettings(
+            calibration_fit_model=Path("calibration/calibration_fit_model.json"),
+            cleanup_wrapper_intermediate=False,
+        ),
+        python=sys.executable,
+    ).run(topology_path=topology, workload_path=workload, out_dir=out_dir)
+
+    summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
+    assert summary["inputs"]["calibration_fit_model"] == str(model.resolve())
 
 
 def test_pipeline_client_can_pass_llm_evaluation_args(tmp_path: Path) -> None:
