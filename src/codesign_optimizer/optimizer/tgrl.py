@@ -937,6 +937,9 @@ def _enumerate_host_graph_edit_actions(
             rack.origin == "seed" and search_space.mutation.allow_remove_initial_racks
         ):
             actions.append(GraphEditAction("remove_rack", rack_id=rack.rack_id))
+        for mode in ("ring", "fully_connected", "switch"):
+            if mode != rack.intra_rack_topology:
+                actions.append(GraphEditAction("change_intra_rack_topology", rack_id=rack.rack_id, target=mode))
         for host in rack.hosts:
             if host.template_id:
                 actions.append(GraphEditAction("remove_host_from_bay", rack_id=rack.rack_id, resource=host.host_id))
@@ -972,6 +975,11 @@ def _enumerate_host_graph_edit_actions(
                                 target=template_id,
                             )
                         )
+    active_racks = [rack for rack in chromosome.racks if rack.active or not rack.optional]
+    if len(active_racks) > 1:
+        for mode in ("ring", "fully_connected"):
+            if mode != chromosome.inter_rack:
+                actions.append(GraphEditAction("change_inter_rack_topology", target=mode))
     return actions
 
 
@@ -1081,10 +1089,15 @@ def _action_allowed_by_config(
             "add_host_to_bay",
             "remove_host_from_bay",
             "replace_host_template",
+            "change_intra_rack_topology",
+            "change_inter_rack_topology",
             "add_rack_from_template",
             "remove_rack",
         }:
             return False
+        if action.action_type in {"change_intra_rack_topology", "change_inter_rack_topology"}:
+            if not _topology_action_allowed_by_exhaustive_space(action, chromosome, search_space):
+                return False
         if action.action_type == "remove_host_from_bay" and not config.allow_empty_slots:
             return False
         return not config.freeze_topology

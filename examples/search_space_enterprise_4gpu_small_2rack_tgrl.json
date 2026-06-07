@@ -205,6 +205,10 @@
     "max_inter_rack_link_qty": 12,
     "allow_remove_initial_racks": false
   },
+  "exhaustive": {
+    "intra_rack_topologies": ["switch", "ring", "fully_connected"],
+    "inter_rack_topologies": ["ring", "fully_connected"]
+  },
   "limits": {
     "max_total_cost": 4000000,
     "max_peak_power_watts": 50000,

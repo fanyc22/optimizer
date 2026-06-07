@@ -116,10 +116,19 @@ def test_tgrl_host_mode_only_enumerates_and_applies_host_actions() -> None:
         "add_host_to_bay",
         "remove_host_from_bay",
         "replace_host_template",
+        "change_intra_rack_topology",
+        "change_inter_rack_topology",
         "add_rack_from_template",
         "remove_rack",
     }
     assert any(action.action_type == "add_rack_from_template" and action.target == "pcie_compute_leaf" for action in actions)
+    assert any(action.action_type == "change_intra_rack_topology" and action.target == "ring" for action in actions)
+    assert any(
+        action.action_type == "change_intra_rack_topology" and action.target == "fully_connected"
+        for action in actions
+    )
+    assert not any(action.action_type == "add_node_to_slot" for action in actions)
+    assert not any(action.action_type == "replace_node_type" for action in actions)
     assert any(action.action_type == "add_host_to_bay" and action.resource == "host1" for action in actions)
     assert any(action.action_type == "remove_host_from_bay" and action.resource == "host0" for action in actions)
     assert any(action.action_type == "replace_host_template" and action.resource == "host0" for action in actions)
@@ -139,6 +148,16 @@ def test_tgrl_host_mode_only_enumerates_and_applies_host_actions() -> None:
 
     exported = HardwareTopologyExporter(library).export(updated)
     assert exported.rank_count == 18
+
+    change_intra = next(
+        action
+        for action in actions
+        if action.action_type == "change_intra_rack_topology" and action.target == "ring"
+    )
+    topology_updated = apply_graph_edit_action(chromosome, change_intra, search_space=space)
+    assert topology_updated.racks[0].intra_rack_topology == "ring"
+    repair = CandidateRepairer(library, space).repair_and_validate(topology_updated)
+    assert repair.feasible, repair.messages
 
 
 def test_tgrl_host_mode_filters_host_actions_by_rack_units() -> None:

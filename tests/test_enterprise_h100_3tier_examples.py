@@ -176,6 +176,17 @@ def test_enterprise_4gpu_small_2rack_search_space_keeps_exploration_headroom() -
     actions = enumerate_graph_edit_actions(chromosome, component_library=library, search_space=space)
     assert any(action.action_type == "add_rack_from_template" for action in actions)
     assert any(
+        action.action_type == "change_intra_rack_topology"
+        and action.rack_id == "rack0"
+        and action.target == "ring"
+        for action in actions
+    )
+    assert any(
+        action.action_type == "change_inter_rack_topology"
+        and action.target == "fully_connected"
+        for action in actions
+    )
+    assert any(
         action.action_type == "add_host_to_bay"
         and action.resource == "host2"
         and action.target == "l40s_4gpu_inference_2u_host"
@@ -192,3 +203,26 @@ def test_enterprise_4gpu_small_2rack_search_space_keeps_exploration_headroom() -
     expanded = apply_graph_edit_action(chromosome, add_rack, search_space=space)
     expanded_repair = CandidateRepairer(library, space).repair_and_validate(expanded)
     assert expanded_repair.feasible, expanded_repair.messages
+
+    rack_topology_action = next(
+        action
+        for action in actions
+        if action.action_type == "change_intra_rack_topology"
+        and action.rack_id == "rack0"
+        and action.target == "ring"
+    )
+    rack_topology_changed = apply_graph_edit_action(chromosome, rack_topology_action, search_space=space)
+    assert rack_topology_changed.racks[0].intra_rack_topology == "ring"
+    rack_topology_repair = CandidateRepairer(library, space).repair_and_validate(rack_topology_changed)
+    assert rack_topology_repair.feasible, rack_topology_repair.messages
+
+    inter_topology_action = next(
+        action
+        for action in actions
+        if action.action_type == "change_inter_rack_topology"
+        and action.target == "fully_connected"
+    )
+    inter_topology_changed = apply_graph_edit_action(chromosome, inter_topology_action, search_space=space)
+    assert inter_topology_changed.inter_rack == "fully_connected"
+    inter_topology_repair = CandidateRepairer(library, space).repair_and_validate(inter_topology_changed)
+    assert inter_topology_repair.feasible, inter_topology_repair.messages
