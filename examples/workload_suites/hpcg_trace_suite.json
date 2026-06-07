@@ -1,0 +1,32 @@
+{
+  "name": "hpcg_trace_suite",
+  "metric": "makespan",
+  "workload_concurrency": 5,
+  "workloads": [
+    {
+      "name": "hpcg_trace_n16_iter3",
+      "path": "tmp/workloads/matrix_solver/hpcg_trace/hpcg_trace_n16_iter3.json",
+      "weight": 1.0
+    },
+    {
+      "name": "hpcg_trace_n32_iter5",
+      "path": "tmp/workloads/matrix_solver/hpcg_trace/hpcg_trace_n32_iter5.json",
+      "weight": 1.0
+    },
+    {
+      "name": "hpcg_trace_n64_iter50",
+      "path": "tmp/workloads/matrix_solver/hpcg_trace/hpcg_trace_n64_iter50.json",
+      "weight": 1.0
+    },
+    {
+      "name": "hpcg_trace_n104_iter100",
+      "path": "tmp/workloads/matrix_solver/hpcg_trace/hpcg_trace_n104_iter100.json",
+      "weight": 1.0
+    },
+    {
+      "name": "hpcg_trace_n104_iter500",
+      "path": "tmp/workloads/matrix_solver/hpcg_trace/hpcg_trace_n104_iter500.json",
+      "weight": 1.0
+    }
+  ]
+}

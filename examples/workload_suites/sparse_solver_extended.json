@@ -30,7 +30,7 @@
     },
     {
         "name": "supernodal",
-        "path": "mapper/examples/supernodal_case.json",
+        "path": "mapper/examples/supernodal_pdf_1138_bus_n1138_nnz4054.json",
         "weight": 1.0
     }
   ]
