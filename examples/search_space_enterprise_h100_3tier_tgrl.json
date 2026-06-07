@@ -259,19 +259,20 @@
     "inter_rack_topologies": ["ring", "fully_connected"]
   },
   "limits": {
-    "max_total_cost": 10500000,
-    "max_peak_power_watts": 100000,
+    "max_total_cost": 20000000,
+    "max_peak_power_watts": 200000,
     "max_rack_power_watts": 50000,
     "max_rack_units": 42,
-    "max_total_racks": 3,
+    "max_total_racks": 8,
     "min_compute_racks": 1,
-    "max_compute_racks": 3
+    "max_compute_racks": 8
   },
   "evaluation": {
     "workload_kind": "mapper",
     "mapper": "heft",
     "parallel": "none",
     "topology_format": "hardware",
+    "calibration_fit_model": "calibration/calibration_fit_model.json",
     "cleanup_wrapper_intermediate": true
   }
 }
