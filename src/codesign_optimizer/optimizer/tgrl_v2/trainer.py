@@ -1781,6 +1781,8 @@ def _estimated_finite_candidate_count(
     freeze_topology: bool,
     allow_empty_slots: bool,
 ) -> int | None:
+    if space.mutation.search_granularity == "host":
+        return None
     exhaustive = space.exhaustive
     has_finite_bounds = bool(exhaustive.slot_options or allow_empty_slots)
     has_finite_bounds = has_finite_bounds or any(

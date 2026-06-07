@@ -216,7 +216,7 @@ python3 tools/run_mapper_sim_pipeline.py
 }
 ```
 
-`pipeline_client.py` 会把相对路径按 `evaluation.repo_root` 或默认 repo root 解析成绝对路径，并传给 wrapper 的 `--calibration-fit-model`；wrapper 会先把模型物化进生成的 `mapper_hardware.json` 和 `hardware_topology.json`，再启动 congestion-aware simulator。这个字段比把同样参数塞进 `sim_extra` 更适合正式搜索，因为 `outputs/run_summary.json` 会记录 `inputs.calibration_fit_model`、`inputs.materialized_calibration` 和物化统计，后续比较候选结果时能看到使用的是哪份拟合模型。
+`pipeline_client.py` 会把相对路径按 `evaluation.repo_root` 或默认 repo root 解析成绝对路径，并传给 wrapper 的 `--calibration-fit-model`；wrapper 会先物化校准模型，再启动 congestion-aware simulator。`hardware_topology.json` 保留 simulator 使用的紧凑 per-hardware-link 校准表；`mapper_hardware.json` 默认使用 `evaluation.mapper_calibration_mode: "baked"`，把选定 communication group 的校准直接折进每条投影 mapper link 的 `bw_gbps`/`latency_ms`。需要复现旧的 mapper 大表行为时，可以把 `mapper_calibration_mode` 设为 `"full"`。这个字段比把同样参数塞进 `sim_extra` 更适合正式搜索，因为 `outputs/run_summary.json` 会记录 `inputs.calibration_fit_model`、`inputs.materialized_calibration` 和物化统计，后续比较候选结果时能看到使用的是哪份拟合模型。
 
 ## 6. Repair 与约束检查
 

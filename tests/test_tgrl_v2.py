@@ -25,7 +25,12 @@ from codesign_optimizer.optimizer.tgrl_v2.observation import (
     GraphObservationBuilder,
 )
 from codesign_optimizer.optimizer.tgrl_v2.ppo import PPOConfig, PPOTransition, attach_gae, ppo_update
-from codesign_optimizer.optimizer.tgrl_v2.trainer import TGRLPPOConfig, TGRLPPOTrainer, _write_svg_lines
+from codesign_optimizer.optimizer.tgrl_v2.trainer import (
+    TGRLPPOConfig,
+    TGRLPPOTrainer,
+    _estimated_finite_candidate_count,
+    _write_svg_lines,
+)
 from codesign_optimizer.optimizer.workload_suite import (
     WorkloadRunFeedback,
     WorkloadSuite,
@@ -239,6 +244,21 @@ def _suite_feedback(*, speedup_a: float, speedup_b: float):
             ),
         ],
         baseline,
+    )
+
+
+def test_finite_candidate_count_skips_host_granularity() -> None:
+    fixture = Path(__file__).resolve().parents[1] / "examples" / "search_space_host_template_tgrl.json"
+    space = SearchSpace.model_validate(json.loads(fixture.read_text()))
+
+    assert space.mutation.search_granularity == "host"
+    assert (
+        _estimated_finite_candidate_count(
+            space,
+            freeze_topology=False,
+            allow_empty_slots=True,
+        )
+        is None
     )
 
 

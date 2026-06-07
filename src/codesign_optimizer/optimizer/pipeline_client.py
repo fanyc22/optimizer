@@ -82,6 +82,8 @@ class MapperSimulatorPipelineClient:
                 self.evaluation.calibration_fit_model,
             )
             cmd.extend(["--calibration-fit-model", str(calibration_fit_model)])
+            cmd.extend(["--mapper-calibration-mode", self.evaluation.mapper_calibration_mode])
+            cmd.extend(["--mapper-calibration-group", self.evaluation.mapper_calibration_group])
         sim_extra = list(self.evaluation.sim_extra)
         if self.evaluation.scaling_report and "--scaling-report=true" not in sim_extra:
             sim_extra.append("--scaling-report=true")

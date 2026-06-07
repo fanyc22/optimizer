@@ -107,6 +107,8 @@ class EvaluationSettings(BaseModel):
     sim_extra: list[str] = Field(default_factory=list)
     mapper_extra: list[str] = Field(default_factory=list)
     calibration_fit_model: Path | None = None
+    mapper_calibration_mode: Literal["baked", "full"] = "baked"
+    mapper_calibration_group: str = "native"
     scaling_report: bool = False
     cleanup_wrapper_intermediate: bool = True
     timeout_seconds: int | None = Field(default=None, ge=1)

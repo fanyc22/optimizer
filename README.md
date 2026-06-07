@@ -143,11 +143,15 @@ root detected by the optimizer:
 ```
 
 The optimizer passes this to `tools/run_mapper_sim_pipeline.py
---calibration-fit-model`. The wrapper materializes the model into the generated
-`mapper_hardware.json` and `hardware_topology.json` calibration fields before
-launching simulator, so the simulator command does not include
-`--calibration-fit-model`. This requires the normal `hardware_topology.v2` +
-congestion-aware analytical simulator path.
+--calibration-fit-model`. The wrapper materializes the model before launching
+simulator: `hardware_topology.json` keeps the compact per-hardware-link
+calibration tables used by simulator, while `mapper_hardware.json` defaults to
+`mapper_calibration_mode: "baked"` and folds the selected communication group
+into each projected mapper link's `bw_gbps` and `latency_ms`. The old expanded
+mapper calibration tables can still be requested with
+`mapper_calibration_mode: "full"` for comparison. The simulator command does not
+include `--calibration-fit-model`. This requires the normal
+`hardware_topology.v2` + congestion-aware analytical simulator path.
 
 To optimize for LLM inference, keep using `--workload` as the path argument but
 point it at a supported LLM `config.json` or model directory, and set

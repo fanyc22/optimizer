@@ -36,6 +36,8 @@ parser.add_argument("--topology-format")
 parser.add_argument("--mapper-extra", action="append", default=[])
 parser.add_argument("--sim-extra", action="append", default=[])
 parser.add_argument("--calibration-fit-model")
+parser.add_argument("--mapper-calibration-mode")
+parser.add_argument("--mapper-calibration-group")
 args = parser.parse_args()
 if bool(args.workload) == bool(args.llm_config):
     raise SystemExit(3)
@@ -60,6 +62,8 @@ summary = {
         "out": args.out,
         "calibration_fit_model": args.calibration_fit_model,
         "materialized_calibration": args.calibration_fit_model is not None,
+        "mapper_calibration_mode": args.mapper_calibration_mode,
+        "mapper_calibration_group": args.mapper_calibration_group,
     },
     "simulator": {
         "stdout": str(stdout),
@@ -140,6 +144,8 @@ def test_pipeline_client_passes_calibration_fit_model(tmp_path: Path) -> None:
     summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
     assert summary["inputs"]["calibration_fit_model"] == str(model.resolve())
     assert summary["inputs"]["materialized_calibration"] is True
+    assert summary["inputs"]["mapper_calibration_mode"] == "baked"
+    assert summary["inputs"]["mapper_calibration_group"] == "native"
 
 
 def test_pipeline_client_can_pass_llm_evaluation_args(tmp_path: Path) -> None:
