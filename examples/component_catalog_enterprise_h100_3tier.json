@@ -13,6 +13,58 @@
       "cost_unit": 130000,
       "rack_units": 0
     },
+    "GPU_NVIDIA_H200_SXM5_141GB": {
+      "role": "gpu",
+      "peak_tflops": 1979,
+      "memory_bw_gbps": 4800,
+      "memory_latency_ns": 75,
+      "local_memory_gb": 141,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 700,
+      "cost_unit": 155000,
+      "rack_units": 0
+    },
+    "GPU_NVIDIA_H100_PCIE_80GB": {
+      "role": "gpu",
+      "peak_tflops": 1513,
+      "memory_bw_gbps": 2000,
+      "memory_latency_ns": 85,
+      "local_memory_gb": 80,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 350,
+      "cost_unit": 60000,
+      "rack_units": 0
+    },
+    "GPU_NVIDIA_L40S_PCIE_48GB": {
+      "role": "gpu",
+      "peak_tflops": 1466,
+      "memory_bw_gbps": 864,
+      "memory_latency_ns": 110,
+      "local_memory_gb": 48,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 350,
+      "cost_unit": 18000,
+      "rack_units": 0
+    },
+    "GPU_NVIDIA_L4_PCIE_24GB": {
+      "role": "gpu",
+      "peak_tflops": 485,
+      "memory_bw_gbps": 300,
+      "memory_latency_ns": 130,
+      "local_memory_gb": 24,
+      "slots": 1,
+      "max_parallelism": 1,
+      "comm_slots": 1,
+      "tdp_watts": 72,
+      "cost_unit": 4500,
+      "rack_units": 0
+    },
     "CPU_XEON_5TH_64C_350W": {
       "role": "cpu",
       "peak_tflops": 6,
@@ -26,11 +78,45 @@
       "cost_unit": 18000,
       "rack_units": 0
     },
+    "CPU_XEON_5TH_32C_205W": {
+      "role": "cpu",
+      "peak_tflops": 3,
+      "memory_bw_gbps": 320,
+      "memory_latency_ns": 95,
+      "local_memory_gb": 512,
+      "slots": 32,
+      "max_parallelism": 32,
+      "comm_slots": 1,
+      "tdp_watts": 205,
+      "cost_unit": 7000,
+      "rack_units": 0
+    },
     "HGX_H100_8GPU_NVSWITCH_FABRIC": {
       "role": "switch",
       "radix": 32,
       "tdp_watts": 2500,
       "cost_unit": 120000,
+      "rack_units": 0
+    },
+    "HGX_H200_8GPU_NVSWITCH_FABRIC": {
+      "role": "switch",
+      "radix": 32,
+      "tdp_watts": 2500,
+      "cost_unit": 150000,
+      "rack_units": 0
+    },
+    "PCIE_ACCELERATOR_FABRIC_4GPU": {
+      "role": "switch",
+      "radix": 16,
+      "tdp_watts": 140,
+      "cost_unit": 10000,
+      "rack_units": 0
+    },
+    "PCIE_ACCELERATOR_FABRIC_8GPU": {
+      "role": "switch",
+      "radix": 32,
+      "tdp_watts": 220,
+      "cost_unit": 15000,
       "rack_units": 0
     },
     "PCIE_CPU_HOST_FABRIC": {
@@ -64,8 +150,17 @@
       "protocol": "PCIe",
       "technology": "pcie_gen5_x16",
       "level": "L2",
-      "lanes": 16,
+      "lanes": 1,
       "cost_unit": 450
+    },
+    "HOST_PCIE_GEN4_X16": {
+      "bandwidth_gbps": 256,
+      "latency_ns": 220,
+      "protocol": "PCIe",
+      "technology": "pcie_gen4_x16",
+      "level": "L2",
+      "lanes": 1,
+      "cost_unit": 250
     },
     "NDR400_TO_RACK_SWITCH": {
       "bandwidth_gbps": 400,
@@ -75,6 +170,24 @@
       "level": "L3",
       "lanes": 1,
       "cost_unit": 3000
+    },
+    "ETH200_TO_RACK_SWITCH": {
+      "bandwidth_gbps": 200,
+      "latency_ns": 1000,
+      "protocol": "Ethernet",
+      "technology": "roce_200gbe",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 1400
+    },
+    "ETH100_TO_RACK_SWITCH": {
+      "bandwidth_gbps": 100,
+      "latency_ns": 1300,
+      "protocol": "Ethernet",
+      "technology": "roce_100gbe",
+      "level": "L3",
+      "lanes": 1,
+      "cost_unit": 700
     },
     "NDR400_INTER_RACK": {
       "bandwidth_gbps": 400,
