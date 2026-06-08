@@ -1329,6 +1329,11 @@ def _baseline_is_usable(baseline: WorkloadSuiteBaseline, suite: WorkloadSuite | 
     expected = [item.name for item in suite.workloads] if suite is not None else list(baseline.makespans_us)
     if not expected:
         return False
+    if suite is not None:
+        if baseline.suite_signature and baseline.suite_signature != suite.signature:
+            return False
+        if not baseline.suite_signature and any(item.workload_rank_parallel for item in suite.workloads):
+            return False
     for name in expected:
         value = baseline.makespans_us.get(name)
         if value is None or value <= 0 or value == 1_000_000_000.0:

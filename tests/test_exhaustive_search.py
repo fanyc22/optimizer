@@ -18,7 +18,14 @@ class TopologyAwarePipeline:
     def __init__(self) -> None:
         self.calls = 0
 
-    def run(self, *, topology_path: Path, workload_path: Path, out_dir: Path) -> ParsedPipelineFeedback:
+    def run(
+        self,
+        *,
+        topology_path: Path,
+        workload_path: Path,
+        out_dir: Path,
+        workload_rank_parallel: bool | None = None,
+    ) -> ParsedPipelineFeedback:
         self.calls += 1
         out_dir.mkdir(parents=True, exist_ok=True)
         topology = json.loads(topology_path.read_text(encoding="utf-8"))

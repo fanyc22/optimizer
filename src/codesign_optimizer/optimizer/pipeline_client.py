@@ -18,7 +18,14 @@ logger = logging.getLogger(__name__)
 
 
 class PipelineClient(Protocol):
-    def run(self, *, topology_path: Path, workload_path: Path, out_dir: Path) -> ParsedPipelineFeedback:
+    def run(
+        self,
+        *,
+        topology_path: Path,
+        workload_path: Path,
+        out_dir: Path,
+        workload_rank_parallel: bool | None = None,
+    ) -> ParsedPipelineFeedback:
         ...
 
 
@@ -28,11 +35,23 @@ class MapperSimulatorPipelineClient:
     evaluation: EvaluationSettings
     python: str = "python3"
 
-    def run(self, *, topology_path: Path, workload_path: Path, out_dir: Path) -> ParsedPipelineFeedback:
+    def run(
+        self,
+        *,
+        topology_path: Path,
+        workload_path: Path,
+        out_dir: Path,
+        workload_rank_parallel: bool | None = None,
+    ) -> ParsedPipelineFeedback:
         topology_path = topology_path.resolve()
         workload_path = workload_path.resolve()
         out_dir = out_dir.resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
+        use_workload_rank_parallel = (
+            self.evaluation.workload_rank_parallel
+            if workload_rank_parallel is None
+            else bool(workload_rank_parallel)
+        )
         cmd = [
             self.python,
             str(self.repo_root / "tools" / "run_mapper_sim_pipeline.py"),
@@ -74,6 +93,8 @@ class MapperSimulatorPipelineClient:
             )
         else:
             cmd.extend(["--workload", str(workload_path)])
+            if use_workload_rank_parallel:
+                cmd.append("--workload-rank-parallel")
         for item in self.evaluation.mapper_extra:
             cmd.extend(["--mapper-extra", item])
         if self.evaluation.calibration_fit_model is not None:

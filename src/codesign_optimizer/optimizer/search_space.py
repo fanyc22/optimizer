@@ -94,6 +94,7 @@ class EvaluationSettings(BaseModel):
     workload_kind: Literal["mapper", "llm"] = "mapper"
     mapper: str = "heft"
     parallel: str = "auto"
+    workload_rank_parallel: bool = False
     topology_format: str = "hardware"
     llm_prefill_batch_size: int = Field(default=1, ge=1)
     llm_prompt_len: int = Field(default=2048, ge=0)

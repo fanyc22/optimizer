@@ -48,7 +48,14 @@ class FakePipeline:
         self.max_active = 0
         self._lock = threading.Lock()
 
-    def run(self, *, topology_path: Path, workload_path: Path, out_dir: Path) -> ParsedPipelineFeedback:
+    def run(
+        self,
+        *,
+        topology_path: Path,
+        workload_path: Path,
+        out_dir: Path,
+        workload_rank_parallel: bool | None = None,
+    ) -> ParsedPipelineFeedback:
         out_dir.mkdir(parents=True, exist_ok=True)
         with self._lock:
             self.calls += 1
@@ -230,6 +237,7 @@ def _suite_feedback(*, speedup_a: float, speedup_b: float):
                 name="a",
                 path=Path("a.json"),
                 weight=0.5,
+                workload_rank_parallel=False,
                 out_dir=Path("/tmp/a"),
                 feedback=_feedback_with_makespan(int(round(1000.0 / speedup_a)), workload="a"),
                 speedup=speedup_a,
@@ -238,6 +246,7 @@ def _suite_feedback(*, speedup_a: float, speedup_b: float):
                 name="b",
                 path=Path("b.json"),
                 weight=0.5,
+                workload_rank_parallel=False,
                 out_dir=Path("/tmp/b"),
                 feedback=_feedback_with_makespan(int(round(1000.0 / speedup_b)), workload="b"),
                 speedup=speedup_b,

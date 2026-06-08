@@ -47,7 +47,14 @@ class TelemetryPipeline:
         self.max_active = 0
         self._lock = threading.Lock()
 
-    def run(self, *, topology_path: Path, workload_path: Path, out_dir: Path) -> ParsedPipelineFeedback:
+    def run(
+        self,
+        *,
+        topology_path: Path,
+        workload_path: Path,
+        out_dir: Path,
+        workload_rank_parallel: bool | None = None,
+    ) -> ParsedPipelineFeedback:
         out_dir.mkdir(parents=True, exist_ok=True)
         with self._lock:
             self.calls += 1

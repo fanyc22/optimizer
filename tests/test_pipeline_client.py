@@ -33,6 +33,7 @@ parser.add_argument("--out")
 parser.add_argument("--mapper")
 parser.add_argument("--parallel")
 parser.add_argument("--topology-format")
+parser.add_argument("--workload-rank-parallel", action="store_true")
 parser.add_argument("--mapper-extra", action="append", default=[])
 parser.add_argument("--sim-extra", action="append", default=[])
 parser.add_argument("--calibration-fit-model")
@@ -68,6 +69,7 @@ summary = {
         "mapper_calibration_group": args.mapper_calibration_group,
         "save_operator_stats": args.save_operator_stats,
         "wrapper_inputs_saved": args.save_wrapper_inputs,
+        "workload_rank_parallel": args.workload_rank_parallel,
     },
     "simulator": {
         "stdout": str(stdout),
@@ -188,6 +190,47 @@ def test_pipeline_client_can_enable_wrapper_inputs(tmp_path: Path) -> None:
 
     summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
     assert summary["inputs"]["wrapper_inputs_saved"] is True
+
+
+def test_pipeline_client_can_enable_workload_rank_parallel(tmp_path: Path) -> None:
+    repo = _fake_repo(tmp_path)
+    topology = tmp_path / "topology.json"
+    workload = tmp_path / "workload.json"
+    topology.write_text("{}", encoding="utf-8")
+    workload.write_text("{}", encoding="utf-8")
+    out_dir = tmp_path / "case_workload_rank_parallel"
+
+    MapperSimulatorPipelineClient(
+        repo_root=repo,
+        evaluation=EvaluationSettings(workload_rank_parallel=True),
+        python=sys.executable,
+    ).run(topology_path=topology, workload_path=workload, out_dir=out_dir)
+
+    summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
+    assert summary["inputs"]["workload_rank_parallel"] is True
+
+
+def test_pipeline_client_run_override_can_disable_workload_rank_parallel(tmp_path: Path) -> None:
+    repo = _fake_repo(tmp_path)
+    topology = tmp_path / "topology.json"
+    workload = tmp_path / "workload.json"
+    topology.write_text("{}", encoding="utf-8")
+    workload.write_text("{}", encoding="utf-8")
+    out_dir = tmp_path / "case_workload_rank_parallel_override"
+
+    MapperSimulatorPipelineClient(
+        repo_root=repo,
+        evaluation=EvaluationSettings(workload_rank_parallel=True),
+        python=sys.executable,
+    ).run(
+        topology_path=topology,
+        workload_path=workload,
+        out_dir=out_dir,
+        workload_rank_parallel=False,
+    )
+
+    summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
+    assert summary["inputs"]["workload_rank_parallel"] is False
 
 
 def test_pipeline_client_can_pass_llm_evaluation_args(tmp_path: Path) -> None:

@@ -9,6 +9,7 @@ from codesign_optimizer.optimizer.repair import CandidateRepairer
 from codesign_optimizer.optimizer.search_space import SearchSpace
 from codesign_optimizer.optimizer.tgrl import GraphEditAction, heuristic_action_score, telemetry_context
 from codesign_optimizer.optimizer.workload_suite import (
+    MultiWorkloadPipelineRunner,
     WorkloadRunFeedback,
     WorkloadSuite,
     WorkloadSuiteBaseline,
@@ -93,6 +94,29 @@ def _feedback(*, compute: float, network: float, queue_ns: int = 0, remote_ns: i
     return parse_pipeline_feedback(summary=summary, simulator_stdout=stdout)
 
 
+class RecordingPipeline:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def run(
+        self,
+        *,
+        topology_path: Path,
+        workload_path: Path,
+        out_dir: Path,
+        workload_rank_parallel: bool | None = None,
+    ):
+        self.calls.append(
+            {
+                "topology_path": topology_path,
+                "workload_path": workload_path,
+                "out_dir": out_dir,
+                "workload_rank_parallel": workload_rank_parallel,
+            }
+        )
+        return _feedback(compute=0.9, network=0.1, workload=workload_path.stem)
+
+
 def test_workload_suite_parser_normalizes_weights_and_resolves_paths(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -107,7 +131,7 @@ def test_workload_suite_parser_normalizes_weights_and_resolves_paths(tmp_path: P
         {
           "name": "mixed",
           "workloads": [
-            {"name": "a", "path": "mapper/examples/a.json", "weight": 2},
+            {"name": "a", "path": "mapper/examples/a.json", "weight": 2, "workload_rank_parallel": true},
             {"name": "b", "path": "mapper/examples/b.json"}
           ]
         }
@@ -122,6 +146,41 @@ def test_workload_suite_parser_normalizes_weights_and_resolves_paths(tmp_path: P
     assert pytest.approx(sum(item.weight or 0 for item in suite.workloads)) == 1.0
     assert pytest.approx(suite.workloads[0].weight or 0) == 2 / 3
     assert pytest.approx(suite.workloads[1].weight or 0) == 1 / 3
+    assert suite.workloads[0].workload_rank_parallel is True
+    assert suite.workloads[1].workload_rank_parallel is False
+    assert suite.to_dict()["workloads"][0]["workload_rank_parallel"] is True
+
+
+def test_multi_workload_runner_passes_workload_rank_parallel_per_item(tmp_path: Path) -> None:
+    topology = tmp_path / "topology.json"
+    workload_a = tmp_path / "a.json"
+    workload_b = tmp_path / "b.json"
+    topology.write_text("{}", encoding="utf-8")
+    workload_a.write_text("{}", encoding="utf-8")
+    workload_b.write_text("{}", encoding="utf-8")
+    suite = WorkloadSuite.model_validate(
+        {
+            "name": "mixed",
+            "workload_concurrency": 1,
+            "workloads": [
+                {"name": "a", "path": str(workload_a), "workload_rank_parallel": True},
+                {"name": "b", "path": str(workload_b)},
+            ],
+        }
+    )
+    pipeline = RecordingPipeline()
+
+    feedback = MultiWorkloadPipelineRunner(pipeline, suite).run(
+        topology_path=topology,
+        out_dir=tmp_path / "out",
+        baseline=None,
+    )
+
+    assert feedback.baseline.suite_signature == suite.signature
+    assert [call["workload_rank_parallel"] for call in pipeline.calls] == [True, False]
+    payload = feedback.to_dict()
+    assert payload["suite"]["workloads"][0]["workload_rank_parallel"] is True
+    assert payload["workloads"][0]["workload_rank_parallel"] is True
 
 
 def test_workload_suite_parser_rejects_duplicate_names(tmp_path: Path) -> None:
@@ -154,19 +213,21 @@ def test_multi_workload_speedup_and_high_water_telemetry() -> None:
         }
     )
     runs = [
-        WorkloadRunFeedback(
-            name="llm",
-            path=Path("llm.json"),
-            weight=0.5,
-            out_dir=Path("/tmp/llm"),
+            WorkloadRunFeedback(
+                name="llm",
+                path=Path("llm.json"),
+                weight=0.5,
+                workload_rank_parallel=False,
+                out_dir=Path("/tmp/llm"),
             feedback=_feedback(compute=0.97, network=0.1, workload="llm"),
             speedup=2.0,
         ),
-        WorkloadRunFeedback(
-            name="gnn",
-            path=Path("gnn.json"),
-            weight=0.5,
-            out_dir=Path("/tmp/gnn"),
+            WorkloadRunFeedback(
+                name="gnn",
+                path=Path("gnn.json"),
+                weight=0.5,
+                workload_rank_parallel=False,
+                out_dir=Path("/tmp/gnn"),
             feedback=_feedback(compute=0.3, network=0.95, queue_ns=2_000_000, remote_ns=3_000_000, workload="gnn"),
             speedup=0.5,
         ),

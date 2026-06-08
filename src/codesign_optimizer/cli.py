@@ -351,6 +351,14 @@ def tgrl_optimizer(
         "--allow-empty-slots/--no-allow-empty-slots",
         help="Let TG-RL remove devices by treating each occupied slot as optionally empty.",
     ),
+    workload_rank_parallel: bool | None = typer.Option(
+        None,
+        "--workload-rank-parallel/--no-workload-rank-parallel",
+        help=(
+            "Override workload-rank-parallel for this run. For --workload-suite, "
+            "the override is applied to every suite workload."
+        ),
+    ),
     visualize_best: bool = typer.Option(
         True,
         "--visualize-best/--no-visualize-best",
@@ -375,6 +383,15 @@ def tgrl_optimizer(
 
     component_library = load_component_library(load_jsonc(catalog))
     search_space = SearchSpace.model_validate(load_jsonc(space))
+    if workload_rank_parallel is not None:
+        search_space = search_space.model_copy(
+            update={
+                "evaluation": search_space.evaluation.model_copy(
+                    update={"workload_rank_parallel": bool(workload_rank_parallel)}
+                )
+            },
+            deep=True,
+        )
     repo_root = search_space.evaluation.repo_root or _default_repo_root()
     pipeline = MapperSimulatorPipelineClient(repo_root=repo_root, evaluation=search_space.evaluation)
     if mode == "v2":
@@ -388,6 +405,16 @@ def tgrl_optimizer(
             raise typer.Exit(code=2) from exc
 
         suite_model = load_workload_suite(workload_suite, repo_root=repo_root) if workload_suite is not None else None
+        if suite_model is not None and workload_rank_parallel is not None:
+            suite_model = suite_model.model_copy(
+                update={
+                    "workloads": [
+                        item.model_copy(update={"workload_rank_parallel": bool(workload_rank_parallel)})
+                        for item in suite_model.workloads
+                    ]
+                },
+                deep=True,
+            )
         runner_v2 = TGRLPPOTrainer(
             component_library=component_library,
             search_space=search_space,

@@ -6,52 +6,62 @@
     {
       "name": "qwen_shortest",
       "path": "tmp/taskgraphs/qwen_shortest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     },
     {
       "name": "qwen_longest",
       "path": "tmp/taskgraphs/qwen_longest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     },
     {
       "name": "llama_shortest",
       "path": "tmp/taskgraphs/llama_shortest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     },
     {
       "name": "llama_longest",
       "path": "tmp/taskgraphs/llama_longest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     },
     {
       "name": "gpt3_13b_shortest",
       "path": "tmp/taskgraphs/gpt3_13b_shortest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     },
     {
       "name": "gpt3_13b_longest",
       "path": "tmp/taskgraphs/gpt3_13b_longest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     },
     {
       "name": "gemma_shortest",
       "path": "tmp/taskgraphs/gemma_shortest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     },
     {
       "name": "gemma_longest",
       "path": "tmp/taskgraphs/gemma_longest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     },
     {
       "name": "mixtral_shortest",
       "path": "tmp/taskgraphs/mixtral_shortest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     },
     {
       "name": "mixtral_longest",
       "path": "tmp/taskgraphs/mixtral_longest_tp2_pp4_taskgraph.json",
-      "weight": 1.0
+      "weight": 1.0,
+      "workload_rank_parallel": true
     }
   ]
 }
