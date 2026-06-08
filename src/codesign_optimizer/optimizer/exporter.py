@@ -33,6 +33,7 @@ class HardwareTopologyExporter:
 
     def export(self, chromosome: Chromosome, *, iteration: int = 0) -> ExportedHardware:
         active_racks = [rack for rack in chromosome.racks if _rack_is_active(rack)]
+        cluster_children = [rack.rack_id for rack in active_racks]
         nodes: list[dict[str, Any]] = []
         links: list[dict[str, Any]] = []
         groups: list[dict[str, Any]] = [
@@ -40,7 +41,7 @@ class HardwareTopologyExporter:
                 "id": "cluster0",
                 "level": "L4",
                 "type": "SuperPOD",
-                "children": [rack.rack_id for rack in active_racks],
+                "children": cluster_children,
             }
         ]
         proposal_nodes: list[InstantiatedNode] = []
@@ -163,7 +164,15 @@ class HardwareTopologyExporter:
                 }
             )
 
-        self._connect_racks(chromosome, rack_gateways, links, proposal_links)
+        self._connect_racks(
+            chromosome,
+            rack_gateways,
+            links,
+            proposal_links,
+            nodes=nodes,
+            proposal_nodes=proposal_nodes,
+            cluster_children=cluster_children,
+        )
 
         if memory_provider is None and rank_map:
             memory_provider = {"node_id": rank_map[0]["node_id"], "capability_id": "local_mem"}
@@ -618,6 +627,10 @@ class HardwareTopologyExporter:
         rack_gateways: list[str],
         links: list[dict[str, Any]],
         proposal_links: list[InstantiatedLink],
+        *,
+        nodes: list[dict[str, Any]],
+        proposal_nodes: list[InstantiatedNode],
+        cluster_children: list[str],
     ) -> None:
         if len(rack_gateways) <= 1:
             return
@@ -638,6 +651,9 @@ class HardwareTopologyExporter:
             )
         elif chromosome.inter_rack == "fully_connected":
             pairs = [(src, dst) for idx, src in enumerate(rack_gateways) for dst in rack_gateways[idx + 1 :]]
+        elif chromosome.inter_rack == "switch":
+            switch_id = self._add_inter_rack_switch(chromosome, nodes, proposal_nodes, cluster_children)
+            pairs = [(gateway, switch_id) for gateway in rack_gateways]
         else:
             pairs = []
         for src, dst in pairs:
@@ -653,6 +669,40 @@ class HardwareTopologyExporter:
                 bidirectional=True,
                 scope="inter",
             )
+
+    def _add_inter_rack_switch(
+        self,
+        chromosome: Chromosome,
+        nodes: list[dict[str, Any]],
+        proposal_nodes: list[InstantiatedNode],
+        cluster_children: list[str],
+    ) -> str:
+        active_racks = [rack for rack in chromosome.racks if _rack_is_active(rack)]
+        type_name = select_inter_rack_switch_type(self._library, active_racks)
+        spec = self._library.node_types[type_name]
+        node_id = "cluster0_inter_sw0"
+        cluster_children.append(node_id)
+        proposal_nodes.append(InstantiatedNode(node_id=node_id, type=type_name))
+        nodes.append(
+            {
+                "id": node_id,
+                "parent": "cluster0",
+                "level": "L4",
+                "domain": "cluster:cluster0",
+                "role": "switch",
+                "attrs": {
+                    "inter_rack_topology": "switch",
+                    "node_type": type_name,
+                },
+                "capabilities": {
+                    "network": {
+                        "kind": "switch",
+                        "radix": spec.radix or 64,
+                    }
+                },
+            }
+        )
+        return node_id
 
     def _add_link(
         self,
@@ -839,3 +889,33 @@ def node_role(type_name: str, spec: NodeTypeSpec) -> str:
 
 def _rack_is_active(rack: RackGene) -> bool:
     return rack.active or not rack.optional
+
+
+def select_inter_rack_switch_type(library: ComponentLibrary, active_racks: list[RackGene]) -> str:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for rack in active_racks:
+        type_name = rack.switch_type
+        if (
+            type_name
+            and type_name in library.node_types
+            and node_role(type_name, library.node_types[type_name]) == "switch"
+            and type_name not in seen
+        ):
+            candidates.append(type_name)
+            seen.add(type_name)
+    if not candidates:
+        for type_name, spec in library.node_types.items():
+            if node_role(type_name, spec) == "switch" and type_name not in seen:
+                candidates.append(type_name)
+                seen.add(type_name)
+    if not candidates:
+        raise ValueError("inter_rack topology=switch requires a switch node type")
+    return max(
+        candidates,
+        key=lambda name: (
+            library.node_types[name].radix or 0,
+            -library.node_types[name].cost_unit,
+            name,
+        ),
+    )

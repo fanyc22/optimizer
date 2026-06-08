@@ -908,7 +908,7 @@ def enumerate_graph_edit_actions(
         target = _adjacent_link_type(chromosome.inter_rack_link_type, inter_link_order, direction=direction)
         if target:
             actions.append(GraphEditAction(action_type, target=target))
-    for mode in ("ring", "fully_connected"):
+    for mode in ("ring", "fully_connected", "switch"):
         if mode != chromosome.inter_rack:
             actions.append(GraphEditAction("change_inter_rack_topology", target=mode))
     return _unique_actions(actions)
@@ -971,7 +971,7 @@ def _enumerate_host_graph_edit_actions(
                         )
     active_racks = [rack for rack in chromosome.racks if rack.active or not rack.optional]
     if len(active_racks) > 1:
-        for mode in ("ring", "fully_connected"):
+        for mode in ("ring", "fully_connected", "switch"):
             if mode != chromosome.inter_rack:
                 actions.append(GraphEditAction("change_inter_rack_topology", target=mode))
     return actions
@@ -1316,6 +1316,8 @@ def heuristic_action_score(
     elif action.action_type == "change_inter_rack_topology":
         if action.target == "fully_connected":
             score += max(0.0, network_pressure) * 3.0
+        elif action.target == "switch":
+            score += max(0.0, network_pressure) * 2.0
         elif action.target == "ring":
             score += 0.5 + context.constraint_pressure * 0.3
     elif action.action_type == "activate_optional_rack" and rack is not None:

@@ -498,7 +498,7 @@ def mutate_random(
             if rack.intra_rack_topology == "switch" and rack.switch_count <= 0:
                 rack.switch_count = 1
         elif op == "inter_mode":
-            result.inter_rack = rng.choice(["ring", "fully_connected"])
+            result.inter_rack = rng.choice(["ring", "fully_connected", "switch"])
         elif op == "remove_rack":
             result.racks = [item for item in result.racks if item.rack_id != rack.rack_id]
     return _sanitize_topologies(result)

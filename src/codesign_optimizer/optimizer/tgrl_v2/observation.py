@@ -149,21 +149,27 @@ class GraphObservationBuilder:
 
         active_racks = [rack for rack in chromosome.racks if rack.active or not rack.optional]
         if chromosome.inter_rack != "none" and len(active_racks) > 1:
-            for left, right in self._inter_rack_pairs(active_racks, chromosome.inter_rack):
-                left_idx = node_lookup[("rack", left.rack_id)]
-                right_idx = node_lookup[("rack", right.rack_id)]
-                edge_feat = [
-                    0.0,
-                    1.0,
-                    0.0,
-                    1.0,
-                    min(1.0, chromosome.inter_rack_link_qty / max(1.0, self._space.mutation.max_inter_rack_link_qty)),
-                    0.0,
-                    1.0,
-                    1.0 if context.top_domain.startswith("cluster:") else 0.0,
-                ]
-                self._add_edge(edge_index, edge_features, left_idx, right_idx, edge_feat)
-                self._add_edge(edge_index, edge_features, right_idx, left_idx, edge_feat)
+            edge_feat = [
+                0.0,
+                1.0,
+                0.0,
+                1.0,
+                min(1.0, chromosome.inter_rack_link_qty / max(1.0, self._space.mutation.max_inter_rack_link_qty)),
+                1.0 if chromosome.inter_rack == "switch" else 0.0,
+                1.0,
+                1.0 if context.top_domain.startswith("cluster:") else 0.0,
+            ]
+            if chromosome.inter_rack == "switch":
+                for rack in active_racks:
+                    rack_idx = node_lookup[("rack", rack.rack_id)]
+                    self._add_edge(edge_index, edge_features, 0, rack_idx, edge_feat)
+                    self._add_edge(edge_index, edge_features, rack_idx, 0, edge_feat)
+            else:
+                for left, right in self._inter_rack_pairs(active_racks, chromosome.inter_rack):
+                    left_idx = node_lookup[("rack", left.rack_id)]
+                    right_idx = node_lookup[("rack", right.rack_id)]
+                    self._add_edge(edge_index, edge_features, left_idx, right_idx, edge_feat)
+                    self._add_edge(edge_index, edge_features, right_idx, left_idx, edge_feat)
 
         prior = softmax({item.action.key: item.heuristic_score for item in masked_actions}, temperature=1.0)
         action_features = [self._action_features(item, context) for item in masked_actions]

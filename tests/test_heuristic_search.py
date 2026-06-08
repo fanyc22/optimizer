@@ -561,6 +561,47 @@ def test_ring_radix_uses_actual_inter_rack_degree() -> None:
     assert report.feasible
 
 
+def test_switch_inter_rack_radix_checks_central_switch() -> None:
+    library = _library(radix=2)
+    space = SearchSpace.model_validate(
+        {
+            "templates": [
+                {
+                    "name": "three_rack_switch",
+                    "racks": [
+                        {
+                            "rack_id": f"rack{idx}",
+                            "role": "compute",
+                            "max_slots": 1,
+                            "slots": [{"slot_id": "slot0", "node_type": "GPU"}],
+                            "switch_count": 1,
+                            "switch_type": "SW",
+                            "intra_rack_topology": "switch",
+                            "intra_rack_link_type": "FAST",
+                        }
+                        for idx in range(3)
+                    ],
+                    "inter_rack": "switch",
+                    "inter_rack_link_type": "OPTICAL",
+                }
+            ],
+            "limits": {
+                "max_total_cost": 200000,
+                "max_peak_power_watts": 20000,
+                "max_rack_power_watts": 10000,
+                "max_rack_units": 42,
+            },
+        }
+    )
+
+    report = CandidateRepairer(library, space).repair_and_validate(
+        chromosome_from_template(space.templates[0])
+    )
+
+    assert not report.feasible
+    assert any("inter-rack switch radix exceeded" in msg for msg in report.messages)
+
+
 def test_rack_capacity_limits_bound_repair() -> None:
     space = _hetero_space()
     chromosome = chromosome_from_template(space.templates[0])

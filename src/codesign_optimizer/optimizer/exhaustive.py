@@ -432,7 +432,7 @@ def count_exhaustive_candidates(
                     template.inter_rack,
                     freeze_topology,
                     default="ring",
-                    allowed={"ring", "fully_connected"},
+                    allowed={"ring", "fully_connected", "switch"},
                 )
             )
             * len(_choices(space.exhaustive.inter_rack_link_types, template.inter_rack_link_type, freeze_topology))
@@ -468,7 +468,7 @@ def iter_exhaustive_chromosomes(
             base.inter_rack,
             freeze_topology,
             default="ring",
-            allowed={"ring", "fully_connected"},
+            allowed={"ring", "fully_connected", "switch"},
         )
         inter_link_types = _choices(space.exhaustive.inter_rack_link_types, base.inter_rack_link_type, freeze_topology)
         inter_link_qty = _choices(space.exhaustive.inter_rack_link_qty, base.inter_rack_link_qty, freeze_topology)

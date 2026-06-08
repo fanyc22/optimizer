@@ -150,7 +150,7 @@ class ExhaustiveSettings(BaseModel):
 RackRole = Literal["compute", "memory", "hybrid"]
 RackOrigin = Literal["seed", "dynamic"]
 FabricMode = Literal["none", "ring", "fully_connected", "switch"]
-InterRackMode = Literal["none", "ring", "fully_connected"]
+InterRackMode = Literal["none", "ring", "fully_connected", "switch"]
 
 
 class SlotSpec(BaseModel):

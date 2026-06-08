@@ -321,7 +321,7 @@ class TCROSearchRunner:
             racks=racks,
             inter_rack_alpha=float(base.inter_rack_link_qty),
             inter_rack_mode_logits=_initial_logits(
-                ["ring", "fully_connected"],
+                ["ring", "fully_connected", "switch"],
                 "ring" if base.inter_rack == "none" else base.inter_rack,
             ),
             inter_rack_link_type_logits=_initial_logits(
@@ -669,6 +669,7 @@ class TCROSearchRunner:
                 if top_domain.startswith("cluster:") or not top_domain:
                     state.inter_rack_alpha += delta * 2.0
                     state.inter_rack_mode_logits["fully_connected"] = state.inter_rack_mode_logits.get("fully_connected", 0.0) + delta
+                    state.inter_rack_mode_logits["switch"] = state.inter_rack_mode_logits.get("switch", 0.0) + delta * 0.5
                     rack_update["cluster_link_delta"] = delta * 2.0
                     activation_delta += delta * 0.5
                 if domain_hit:

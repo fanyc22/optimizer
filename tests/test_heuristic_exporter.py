@@ -209,6 +209,7 @@ def test_exporter_emits_inter_rack_topology_modes() -> None:
     expected_counts = {
         "ring": 3,
         "fully_connected": 3,
+        "switch": 3,
     }
 
     for inter_rack, expected_count in expected_counts.items():
@@ -240,6 +241,12 @@ def test_exporter_emits_inter_rack_topology_modes() -> None:
 
         assert len(rack_links) == expected_count
         assert all(link["bandwidth_gbps"] == 200 for link in rack_links)
+        if inter_rack == "switch":
+            inter_switch = next(node for node in topology_json["nodes"] if node["id"] == "cluster0_inter_sw0")
+            assert inter_switch["parent"] == "cluster0"
+            assert inter_switch["level"] == "L4"
+            assert inter_switch["role"] == "switch"
+            assert all(link["dst"] == "cluster0_inter_sw0" for link in rack_links)
 
 
 def test_exporter_rejects_disconnected_none_topologies() -> None:

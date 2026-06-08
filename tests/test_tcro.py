@@ -225,7 +225,7 @@ def test_tcro_lowering_exports_valid_topology(tmp_path: Path) -> None:
     report = CandidateRepairer(_library(), _space()).repair_and_validate(candidate.chromosome)
 
     assert report.feasible
-    assert candidate.chromosome.inter_rack in {"ring", "fully_connected"}
+    assert candidate.chromosome.inter_rack in {"ring", "fully_connected", "switch"}
 
 
 def test_tcro_link_logits_are_scoped_by_hierarchy(tmp_path: Path) -> None:

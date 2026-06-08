@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from codesign_optimizer.models.hardware import ComponentLibrary
 from codesign_optimizer.optimizer.chromosome import Chromosome, RackGene, role_of_type
-from codesign_optimizer.optimizer.exporter import HardwareTopologyExporter, node_role
+from codesign_optimizer.optimizer.exporter import HardwareTopologyExporter, node_role, select_inter_rack_switch_type
 from codesign_optimizer.optimizer.link_scope import link_type_allowed_for_scope, ordered_link_types_for_scope
 from codesign_optimizer.optimizer.search_space import SearchLimits, SearchSpace
 
@@ -212,7 +212,7 @@ class CandidateRepairer:
         )
         if len(active_racks) > 1 and chromosome.inter_rack == "none":
             chromosome.inter_rack = "ring"
-        if len(active_racks) > 1 and chromosome.inter_rack not in {"ring", "fully_connected"}:
+        if len(active_racks) > 1 and chromosome.inter_rack not in {"ring", "fully_connected", "switch"}:
             chromosome.inter_rack = "ring"
         if len(active_racks) > 1 and (chromosome.inter_rack_link_type is None or not link_type_allowed_for_scope(self._library, chromosome.inter_rack_link_type, "inter")):
             fallback = self._fallback_link_type("inter")
@@ -617,6 +617,46 @@ class CandidateRepairer:
                     feasible = False
                     penalty += (host_ports - host_spec.radix) * 1000.0
                     messages.append(f"{rack.rack_id}.{host.host_id} host switch radix exceeded: {host_ports:.3f} > {host_spec.radix}")
+        feasible, penalty = self._check_inter_rack_switch_radix(
+            chromosome,
+            feasible=feasible,
+            penalty=penalty,
+            messages=messages,
+        )
+        return feasible, penalty
+
+    def _check_inter_rack_switch_radix(
+        self,
+        chromosome: Chromosome,
+        *,
+        feasible: bool,
+        penalty: float,
+        messages: list[str],
+    ) -> tuple[bool, float]:
+        active_racks = [rack for rack in chromosome.racks if rack.active or not rack.optional]
+        if chromosome.inter_rack != "switch" or len(active_racks) <= 1:
+            return feasible, penalty
+        try:
+            switch_type = select_inter_rack_switch_type(self._library, active_racks)
+        except ValueError as exc:
+            feasible = False
+            penalty += 100_000.0
+            messages.append(str(exc))
+            return feasible, penalty
+        switch_spec = self._library.node_types[switch_type]
+        if switch_spec.radix is None:
+            return feasible, penalty
+        ports = (
+            len(active_racks)
+            * chromosome.inter_rack_link_qty
+            * self._link_lanes(chromosome.inter_rack_link_type)
+        )
+        if ports > switch_spec.radix:
+            feasible = False
+            penalty += (ports - switch_spec.radix) * 1000.0
+            messages.append(
+                f"inter-rack switch radix exceeded: {ports:.3f} > {switch_spec.radix}"
+            )
         return feasible, penalty
 
     def _check_topology_connectivity(
@@ -679,6 +719,8 @@ class CandidateRepairer:
             return 0
         if chromosome.inter_rack == "fully_connected":
             return len(active_racks) - 1
+        if chromosome.inter_rack == "switch":
+            return 1
         if chromosome.inter_rack == "ring":
             return 1 if len(active_racks) == 2 else 2
         return 0

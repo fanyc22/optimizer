@@ -1,0 +1,110 @@
+{
+  "name": "llm_taskgraph_old_tmp_sparse_suite",
+  "metric": "makespan",
+  "workload_concurrency": 18,
+  "workloads": [
+    {
+      "name": "llm_qwen_shortest",
+      "path": "tmp/taskgraphs.old/qwen_shortest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "llm_qwen_longest",
+      "path": "tmp/taskgraphs.old/qwen_longest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "llm_llama_shortest",
+      "path": "tmp/taskgraphs.old/llama_shortest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "llm_llama_longest",
+      "path": "tmp/taskgraphs.old/llama_longest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "llm_gpt3_13b_shortest",
+      "path": "tmp/taskgraphs.old/gpt3_13b_shortest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "llm_gpt3_13b_longest",
+      "path": "tmp/taskgraphs.old/gpt3_13b_longest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "llm_gemma_shortest",
+      "path": "tmp/taskgraphs.old/gemma_shortest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "llm_gemma_longest",
+      "path": "tmp/taskgraphs.old/gemma_longest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "llm_mixtral_shortest",
+      "path": "tmp/taskgraphs.old/mixtral_shortest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "llm_mixtral_longest",
+      "path": "tmp/taskgraphs.old/mixtral_longest_taskgraph.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "CoupCons3D",
+      "path": "tmp/sparse/CoupCons3D_pangulu_gstrf_workload_1024.json",
+      "weight": 1.0
+    },
+    {
+      "name": "G3_circuit",
+      "path": "tmp/sparse/G3_circuit_pangulu_gstrf_workload_1024.json",
+      "weight": 1.0
+    },
+    {
+      "name": "apache2",
+      "path": "tmp/sparse/apache2_pangulu_gstrf_workload_1024.json",
+      "weight": 1.0
+    },
+    {
+      "name": "cage12",
+      "path": "tmp/sparse/cage12_pangulu_gstrf_workload_1024.json",
+      "weight": 1.0
+    },
+    {
+      "name": "cg_bcsstk08_iter300",
+      "path": "tmp/sparse/cg_solver_bcsstk08_n1074_nnz12960_iter300.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "cg_bcsstk15_iter200",
+      "path": "tmp/sparse/cg_solver_bcsstk15_n3948_nnz117816_iter200.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "cg_bcsstk36_iter100",
+      "path": "tmp/sparse/cg_solver_bcsstk36_n23052_nnz1143140_iter100.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "ecology1",
+      "path": "tmp/sparse/ecology1_pangulu_gstrf_workload_1024.json",
+      "weight": 1.0
+    }
+  ]
+}
