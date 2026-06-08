@@ -33,7 +33,6 @@ from codesign_optimizer.optimizer.tgrl import (
     MaskedAction,
     TGRLConfig,
     TGRLEvaluation,
-    _feedback_to_dict,
     build_masked_actions,
 )
 from codesign_optimizer.optimizer.tgrl_v2.model import TGRLGNNPolicy, policy_distribution
@@ -67,7 +66,7 @@ class TGRLPPOConfig(BaseModel):
     best_improvement_bonus: float = Field(default=0.1, ge=0.0)
     reward_clip: float = Field(default=5.0, gt=0.0)
     seed_archive_size: int = Field(default=16, ge=1)
-    seed_diversity_steps: int = Field(default=2, ge=0)
+    seed_diversity_steps: int = Field(default=8, ge=0)
     seed_diversity_attempts: int = Field(default=12, ge=1)
     mask_seen_actions: bool = True
     restart_on_stall: bool = True
@@ -998,8 +997,6 @@ class TGRLPPOTrainer:
         dump_json(candidate_dir / "score.json", evaluation.to_summary())
         if evaluation.suite_feedback is not None:
             dump_json(candidate_dir / "suite_feedback.json", evaluation.suite_feedback.to_dict())
-        elif evaluation.feedback is not None:
-            dump_json(candidate_dir / "feedback.json", _feedback_to_dict(evaluation.feedback))
 
     def _persist_step(self, update: int, step: int, evaluations: list[TGRLEvaluation]) -> None:
         dump_json(

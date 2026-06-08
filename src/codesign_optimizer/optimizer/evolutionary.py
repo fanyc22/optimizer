@@ -245,8 +245,6 @@ class HeuristicSearchRunner:
                 cache_hit=True,
             )
             dump_json(candidate_dir / "score.json", copied.to_summary())
-            if copied.feedback is not None:
-                dump_json(candidate_dir / "feedback.json", _feedback_to_dict(copied.feedback))
             logger.info(
                 "Candidate gen=%03d idx=%03d cache hit: score=%.4f feasible=%s",
                 generation,
@@ -312,8 +310,6 @@ class HeuristicSearchRunner:
             feedback=feedback,
         )
         dump_json(candidate_dir / "score.json", evaluation.to_summary())
-        if feedback is not None:
-            dump_json(candidate_dir / "feedback.json", _feedback_to_dict(feedback))
         self._store_cached_evaluation(signature, evaluation)
         logger.info(
             "Candidate gen=%03d idx=%03d done: score=%.4f feasible=%s makespan_us=%.3f max_link_util=%.3f queue_ns=%.3f remote_ns=%.3f",

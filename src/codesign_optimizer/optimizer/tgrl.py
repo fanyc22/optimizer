@@ -601,8 +601,6 @@ class TGRLSearchRunner:
                 cache_hit=True,
             )
             dump_json(candidate_dir / "score.json", copied.to_summary())
-            if copied.feedback is not None:
-                dump_json(candidate_dir / "feedback.json", _feedback_to_dict(copied.feedback))
             logger.info(
                 "TG-RL candidate episode=%03d step=%03d idx=%03d cache hit: score=%.4f feasible=%s",
                 episode,
@@ -673,8 +671,6 @@ class TGRLSearchRunner:
             feedback=feedback,
         )
         dump_json(candidate_dir / "score.json", evaluation.to_summary())
-        if feedback is not None:
-            dump_json(candidate_dir / "feedback.json", _feedback_to_dict(feedback))
         self._store_cached_evaluation(signature, evaluation)
         logger.info(
             "TG-RL candidate episode=%03d step=%03d idx=%03d done: score=%.4f feasible=%s makespan_us=%.3f max_link_util=%.3f queue_ns=%.3f remote_ns=%.3f",
@@ -788,8 +784,6 @@ class TGRLSearchRunner:
         if best.exported is not None:
             dump_json(step_dir / "proposal.json", best.exported.proposal.to_dict())
             dump_json(step_dir / "hardware_topology.json", best.exported.hardware_topology)
-        if best.feedback is not None:
-            dump_json(step_dir / "feedback.json", _feedback_to_dict(best.feedback))
 
     def _persist_final(
         self,

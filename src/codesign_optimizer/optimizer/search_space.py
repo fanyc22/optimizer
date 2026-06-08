@@ -109,6 +109,8 @@ class EvaluationSettings(BaseModel):
     calibration_fit_model: Path | None = None
     mapper_calibration_mode: Literal["baked", "full"] = "baked"
     mapper_calibration_group: str = "native"
+    save_operator_stats: bool = False
+    save_wrapper_inputs: bool = False
     scaling_report: bool = False
     cleanup_wrapper_intermediate: bool = True
     timeout_seconds: int | None = Field(default=None, ge=1)

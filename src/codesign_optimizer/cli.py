@@ -318,7 +318,7 @@ def tgrl_optimizer(
         help="Number of top feasible candidates kept as TG-RL v2 restart seeds.",
     ),
     seed_diversity_steps: int = typer.Option(
-        2,
+        8,
         min=0,
         help="Random valid graph-edit steps used to diversify TG-RL v2 rollout env seeds.",
     ),

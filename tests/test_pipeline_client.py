@@ -38,6 +38,8 @@ parser.add_argument("--sim-extra", action="append", default=[])
 parser.add_argument("--calibration-fit-model")
 parser.add_argument("--mapper-calibration-mode")
 parser.add_argument("--mapper-calibration-group")
+parser.add_argument("--save-operator-stats", action="store_true")
+parser.add_argument("--save-wrapper-inputs", action="store_true")
 args = parser.parse_args()
 if bool(args.workload) == bool(args.llm_config):
     raise SystemExit(3)
@@ -64,6 +66,8 @@ summary = {
         "materialized_calibration": args.calibration_fit_model is not None,
         "mapper_calibration_mode": args.mapper_calibration_mode,
         "mapper_calibration_group": args.mapper_calibration_group,
+        "save_operator_stats": args.save_operator_stats,
+        "wrapper_inputs_saved": args.save_wrapper_inputs,
     },
     "simulator": {
         "stdout": str(stdout),
@@ -101,6 +105,8 @@ def test_pipeline_client_cleans_large_wrapper_outputs_by_default(tmp_path: Path)
     assert Path(summary["inputs"]["topology"]).is_absolute()
     assert Path(summary["inputs"]["workload"]).is_absolute()
     assert Path(summary["inputs"]["out"]).is_absolute()
+    assert summary["inputs"]["save_operator_stats"] is False
+    assert summary["inputs"]["wrapper_inputs_saved"] is False
 
 
 def test_pipeline_client_can_keep_wrapper_outputs(tmp_path: Path) -> None:
@@ -146,6 +152,42 @@ def test_pipeline_client_passes_calibration_fit_model(tmp_path: Path) -> None:
     assert summary["inputs"]["materialized_calibration"] is True
     assert summary["inputs"]["mapper_calibration_mode"] == "baked"
     assert summary["inputs"]["mapper_calibration_group"] == "native"
+
+
+def test_pipeline_client_can_enable_operator_stats(tmp_path: Path) -> None:
+    repo = _fake_repo(tmp_path)
+    topology = tmp_path / "topology.json"
+    workload = tmp_path / "workload.json"
+    topology.write_text("{}", encoding="utf-8")
+    workload.write_text("{}", encoding="utf-8")
+    out_dir = tmp_path / "case_operator_stats"
+
+    MapperSimulatorPipelineClient(
+        repo_root=repo,
+        evaluation=EvaluationSettings(save_operator_stats=True),
+        python=sys.executable,
+    ).run(topology_path=topology, workload_path=workload, out_dir=out_dir)
+
+    summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
+    assert summary["inputs"]["save_operator_stats"] is True
+
+
+def test_pipeline_client_can_enable_wrapper_inputs(tmp_path: Path) -> None:
+    repo = _fake_repo(tmp_path)
+    topology = tmp_path / "topology.json"
+    workload = tmp_path / "workload.json"
+    topology.write_text("{}", encoding="utf-8")
+    workload.write_text("{}", encoding="utf-8")
+    out_dir = tmp_path / "case_wrapper_inputs"
+
+    MapperSimulatorPipelineClient(
+        repo_root=repo,
+        evaluation=EvaluationSettings(save_wrapper_inputs=True),
+        python=sys.executable,
+    ).run(topology_path=topology, workload_path=workload, out_dir=out_dir)
+
+    summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
+    assert summary["inputs"]["wrapper_inputs_saved"] is True
 
 
 def test_pipeline_client_can_pass_llm_evaluation_args(tmp_path: Path) -> None:

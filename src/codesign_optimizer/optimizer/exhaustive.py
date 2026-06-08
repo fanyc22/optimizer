@@ -308,8 +308,6 @@ class ExhaustiveSearchRunner:
 
     def _write_evaluation(self, candidate_dir: Path, evaluation: ExhaustiveEvaluation) -> None:
         dump_json(candidate_dir / "score.json", evaluation.to_summary())
-        if evaluation.feedback is not None:
-            dump_json(candidate_dir / "feedback.json", _feedback_to_dict(evaluation.feedback))
 
     def _persist_final(
         self,

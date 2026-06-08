@@ -702,6 +702,7 @@ def test_tgrl_v0_and_v1_run_with_fake_pipeline(tmp_path: Path) -> None:
     assert (tmp_path / "tgrl_v0" / "tgrl_summary.json").exists()
     assert (tmp_path / "tgrl_v0" / "trajectory.jsonl").exists()
     assert (tmp_path / "tgrl_v0" / "best_hardware_topology.json").exists()
+    assert not any((tmp_path / "tgrl_v0").glob("**/feedback.json"))
 
     pipeline_v1 = TelemetryPipeline(compute_util=0.95, remote_queue_ns=0)
     runner_v1 = TGRLSearchRunner(
@@ -720,6 +721,7 @@ def test_tgrl_v0_and_v1_run_with_fake_pipeline(tmp_path: Path) -> None:
     assert result_v1.best.feasible
     assert result_v1.policy_state
     assert (tmp_path / "tgrl_v1" / "policy_state.json").exists()
+    assert not any((tmp_path / "tgrl_v1").glob("**/feedback.json"))
 
 
 def test_tgrl_v2_reports_missing_torch(tmp_path: Path) -> None:

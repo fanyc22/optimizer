@@ -116,7 +116,6 @@ The search writes per-candidate artifacts under `iter_*/candidate_*`:
 - `proposal.json`
 - `hardware_topology.json`
 - `wrapper/` with mapper/simulator outputs
-- `feedback.json`
 - `score.json`
 
 It also writes `summary.json`, `pareto_frontier.json`,
@@ -152,6 +151,14 @@ mapper calibration tables can still be requested with
 `mapper_calibration_mode: "full"` for comparison. The simulator command does not
 include `--calibration-fit-model`. This requires the normal
 `hardware_topology.v2` + congestion-aware analytical simulator path.
+
+The wrapper also avoids saving large debug artifacts by default. It does not
+save per-operator simulator JSONL stats unless `evaluation.save_operator_stats`
+is `true`, and it writes generated `mapper_hardware.json` /
+`hardware_topology.json` to a runtime temp directory unless
+`evaluation.save_wrapper_inputs` is `true`. Enable these only when debugging a
+specific case; long workloads can otherwise make wrapper artifacts dominate disk
+usage.
 
 To optimize for LLM inference, keep using `--workload` as the path argument but
 point it at a supported LLM `config.json` or model directory, and set

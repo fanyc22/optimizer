@@ -173,7 +173,7 @@ flowchart TD
 5. 对可行候选调用 mapper/simulator wrapper。
 6. 解析 feedback，得到 makespan、link utilization、queue delay、remote memory contention。
 7. 计算多目标 tuple 和加权 score。
-8. 持久化候选目录，包括 `candidate.json`、`proposal.json`、`hardware_topology.json`、`feedback.json` 或 `suite_feedback.json`、`score.json`。
+8. 持久化候选目录，包括 `candidate.json`、`proposal.json`、`hardware_topology.json`、`score.json`，多 workload 评估还会保留 `suite_feedback.json`；单 workload 的解析反馈不再单独写 `feedback.json`。
 9. 把 score 和 telemetry 返回给搜索算法更新下一步策略。
 
 `pipeline_client.py` 中的 wrapper 调用形式大致为：
@@ -217,6 +217,8 @@ python3 tools/run_mapper_sim_pipeline.py
 ```
 
 `pipeline_client.py` 会把相对路径按 `evaluation.repo_root` 或默认 repo root 解析成绝对路径，并传给 wrapper 的 `--calibration-fit-model`；wrapper 会先物化校准模型，再启动 congestion-aware simulator。`hardware_topology.json` 保留 simulator 使用的紧凑 per-hardware-link 校准表；`mapper_hardware.json` 默认使用 `evaluation.mapper_calibration_mode: "baked"`，把选定 communication group 的校准直接折进每条投影 mapper link 的 `bw_gbps`/`latency_ms`。需要复现旧的 mapper 大表行为时，可以把 `mapper_calibration_mode` 设为 `"full"`。这个字段比把同样参数塞进 `sim_extra` 更适合正式搜索，因为 `outputs/run_summary.json` 会记录 `inputs.calibration_fit_model`、`inputs.materialized_calibration` 和物化统计，后续比较候选结果时能看到使用的是哪份拟合模型。
+
+wrapper 默认不保存大体积调试产物，避免长 workload 把 artifact 放大到数十 GB。逐 operator JSONL 统计只有在 `evaluation.save_operator_stats` 为 `true` 时才写出；生成的 `mapper_hardware.json` 与 `hardware_topology.json` 默认只写到 runtime 临时目录，mapper/simulator 消费完即清理，只有在 `evaluation.save_wrapper_inputs` 为 `true` 时才保留在 wrapper 的 `inputs/` 目录。`pipeline_client.py` 会分别传递 `--save-operator-stats` 和 `--save-wrapper-inputs`。
 
 ## 6. Repair 与约束检查
 
@@ -780,7 +782,6 @@ candidate_or_step_dir/
 ├── proposal.json
 ├── hardware_topology.json
 ├── score.json
-├── feedback.json
 └── wrapper/
     ├── optimizer_pipeline_stdout.txt
     ├── optimizer_pipeline_stderr.txt
