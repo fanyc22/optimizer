@@ -146,7 +146,21 @@ def policy_distribution(
     heuristic_weight: float,
 ) -> tuple[torch.distributions.Categorical, torch.Tensor, torch.Tensor, TensorObservation]:
     tensor_observation = tensorize_observation(observation, device)
+    dist, logits, value = policy_distribution_from_tensor(
+        model,
+        tensor_observation,
+        heuristic_weight=heuristic_weight,
+    )
+    return dist, logits, value, tensor_observation
+
+
+def policy_distribution_from_tensor(
+    model: TGRLGNNPolicy,
+    tensor_observation: TensorObservation,
+    *,
+    heuristic_weight: float,
+) -> tuple[torch.distributions.Categorical, torch.Tensor, torch.Tensor]:
     actor_logits, value = model(tensor_observation)
     logits = actor_logits + heuristic_weight * tensor_observation.heuristic_logits
     dist = torch.distributions.Categorical(logits=logits)
-    return dist, logits, value, tensor_observation
+    return dist, logits, value

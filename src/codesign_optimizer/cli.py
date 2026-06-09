@@ -18,7 +18,11 @@ from codesign_optimizer.optimizer.pipeline_client import MapperSimulatorPipeline
 from codesign_optimizer.optimizer.search_space import SearchSpace, load_component_library
 from codesign_optimizer.optimizer.tcro import TCROConfig, TCROSearchRunner
 from codesign_optimizer.optimizer.tgrl import TGRLConfig, TGRLSearchRunner
-from codesign_optimizer.optimizer.workload_suite import load_workload_suite
+from codesign_optimizer.optimizer.workload_suite import (
+    apply_workload_rank_parallel_default,
+    load_workload_suite,
+    workload_suite_rank_parallel_fields,
+)
 from codesign_optimizer.simulator.file_adapter import FileBackedSimulatorClient
 from codesign_optimizer.utils.logging import configure_logging
 
@@ -356,7 +360,7 @@ def tgrl_optimizer(
         "--workload-rank-parallel/--no-workload-rank-parallel",
         help=(
             "Override workload-rank-parallel for this run. For --workload-suite, "
-            "the override is applied to every suite workload."
+            "the value is only used for workloads that do not set workload_rank_parallel."
         ),
     ),
     visualize_best: bool = typer.Option(
@@ -405,15 +409,11 @@ def tgrl_optimizer(
             raise typer.Exit(code=2) from exc
 
         suite_model = load_workload_suite(workload_suite, repo_root=repo_root) if workload_suite is not None else None
-        if suite_model is not None and workload_rank_parallel is not None:
-            suite_model = suite_model.model_copy(
-                update={
-                    "workloads": [
-                        item.model_copy(update={"workload_rank_parallel": bool(workload_rank_parallel)})
-                        for item in suite_model.workloads
-                    ]
-                },
-                deep=True,
+        if suite_model is not None:
+            suite_model = apply_workload_rank_parallel_default(
+                suite_model,
+                workload_rank_parallel,
+                explicit_fields=workload_suite_rank_parallel_fields(workload_suite),
             )
         runner_v2 = TGRLPPOTrainer(
             component_library=component_library,

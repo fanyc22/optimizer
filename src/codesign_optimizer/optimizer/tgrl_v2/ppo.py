@@ -8,7 +8,12 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
-from codesign_optimizer.optimizer.tgrl_v2.model import TGRLGNNPolicy, policy_distribution
+from codesign_optimizer.optimizer.tgrl_v2.model import (
+    TensorObservation,
+    TGRLGNNPolicy,
+    policy_distribution_from_tensor,
+    tensorize_observation,
+)
 from codesign_optimizer.optimizer.tgrl_v2.observation import GraphObservation
 
 
@@ -55,6 +60,16 @@ class PPOConfig:
     learning_rate: float = 3e-4
     heuristic_weight: float = 1.0
     reward_clip: float = 5.0
+
+
+@dataclass(frozen=True)
+class _PreparedPPOTransition:
+    tensor_observation: TensorObservation
+    action: torch.Tensor
+    old_logprob: torch.Tensor
+    advantage: torch.Tensor
+    return_value: torch.Tensor
+    prior_probs: torch.Tensor
 
 
 def attach_gae(
@@ -104,6 +119,7 @@ def ppo_update(
         for item in transitions:
             item.advantage = (item.advantage - adv_mean) / adv_std
 
+    prepared = _prepare_transitions(transitions, device=device)
     metrics = {
         "policy_loss": 0.0,
         "value_loss": 0.0,
@@ -124,30 +140,26 @@ def ppo_update(
             batch_entropy = 0.0
             batch_kl = 0.0
             for idx in batch_indices:
-                transition = transitions[idx]
-                dist, _logits, value, _tensor_obs = policy_distribution(
+                prepared_transition = prepared[idx]
+                dist, _logits, value = policy_distribution_from_tensor(
                     model,
-                    transition.observation,
-                    device=device,
+                    prepared_transition.tensor_observation,
                     heuristic_weight=config.heuristic_weight,
                 )
-                action = torch.tensor(transition.action_index, dtype=torch.long, device=device)
-                new_logprob = dist.log_prob(action)
-                old_logprob = torch.tensor(transition.old_logprob, dtype=torch.float32, device=device)
-                ratio = torch.exp(new_logprob - old_logprob)
-                advantage = torch.tensor(transition.advantage, dtype=torch.float32, device=device)
-                unclipped = ratio * advantage
-                clipped = torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range) * advantage
+                new_logprob = dist.log_prob(prepared_transition.action)
+                ratio = torch.exp(new_logprob - prepared_transition.old_logprob)
+                unclipped = ratio * prepared_transition.advantage
+                clipped = (
+                    torch.clamp(ratio, 1.0 - config.clip_range, 1.0 + config.clip_range)
+                    * prepared_transition.advantage
+                )
                 policy_loss = -torch.min(unclipped, clipped)
-                return_value = torch.tensor(transition.return_value, dtype=torch.float32, device=device)
-                value_loss = F.mse_loss(value, return_value)
+                value_loss = F.mse_loss(value, prepared_transition.return_value)
                 entropy = dist.entropy()
-                prior_probs = torch.softmax(
-                    torch.tensor(transition.observation.heuristic_logits, dtype=torch.float32, device=device),
-                    dim=0,
-                ).clamp_min(1e-9)
                 policy_probs = dist.probs.clamp_min(1e-9)
-                kl_prior = torch.sum(policy_probs * (torch.log(policy_probs) - torch.log(prior_probs)))
+                kl_prior = torch.sum(
+                    policy_probs * (torch.log(policy_probs) - torch.log(prepared_transition.prior_probs))
+                )
                 loss = (
                     policy_loss
                     + config.value_coef * value_loss
@@ -179,3 +191,20 @@ def ppo_update(
     if math.isnan(metrics["loss"]):
         raise RuntimeError("PPO update produced NaN loss")
     return metrics
+
+
+def _prepare_transitions(transitions: list[PPOTransition], *, device: torch.device) -> list[_PreparedPPOTransition]:
+    prepared: list[_PreparedPPOTransition] = []
+    for transition in transitions:
+        tensor_observation = tensorize_observation(transition.observation, device)
+        prepared.append(
+            _PreparedPPOTransition(
+                tensor_observation=tensor_observation,
+                action=torch.tensor(transition.action_index, dtype=torch.long, device=device),
+                old_logprob=torch.tensor(transition.old_logprob, dtype=torch.float32, device=device),
+                advantage=torch.tensor(transition.advantage, dtype=torch.float32, device=device),
+                return_value=torch.tensor(transition.return_value, dtype=torch.float32, device=device),
+                prior_probs=torch.softmax(tensor_observation.heuristic_logits, dim=0).clamp_min(1e-9),
+            )
+        )
+    return prepared

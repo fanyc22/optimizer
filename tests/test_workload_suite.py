@@ -14,7 +14,9 @@ from codesign_optimizer.optimizer.workload_suite import (
     WorkloadSuite,
     WorkloadSuiteBaseline,
     aggregate_multi_workload_feedback,
+    apply_workload_rank_parallel_default,
     load_workload_suite,
+    workload_suite_rank_parallel_fields,
 )
 
 
@@ -149,6 +151,34 @@ def test_workload_suite_parser_normalizes_weights_and_resolves_paths(tmp_path: P
     assert suite.workloads[0].workload_rank_parallel is True
     assert suite.workloads[1].workload_rank_parallel is False
     assert suite.to_dict()["workloads"][0]["workload_rank_parallel"] is True
+
+
+def test_workload_rank_parallel_default_preserves_explicit_suite_values(tmp_path: Path) -> None:
+    suite_path = tmp_path / "suite.json"
+    suite_path.write_text(
+        """
+        {
+          "name": "mixed",
+          "workloads": [
+            {"name": "a", "path": "a.json", "workload_rank_parallel": true},
+            {"name": "b", "path": "b.json", "workload_rank_parallel": false},
+            {"name": "c", "path": "c.json"}
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    for name in ["a.json", "b.json", "c.json"]:
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+
+    suite = load_workload_suite(suite_path, repo_root=tmp_path)
+    suite = apply_workload_rank_parallel_default(
+        suite,
+        True,
+        explicit_fields=workload_suite_rank_parallel_fields(suite_path),
+    )
+
+    assert [item.workload_rank_parallel for item in suite.workloads] == [True, False, True]
 
 
 def test_multi_workload_runner_passes_workload_rank_parallel_per_item(tmp_path: Path) -> None:

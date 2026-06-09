@@ -81,6 +81,43 @@ class WorkloadSuite(BaseModel):
         }
 
 
+def workload_suite_rank_parallel_fields(path: Path) -> list[bool | None]:
+    payload = load_jsonc(path)
+    workloads = payload.get("workloads", []) if isinstance(payload, dict) else []
+    if not isinstance(workloads, list):
+        return []
+    fields: list[bool | None] = []
+    for item in workloads:
+        if isinstance(item, dict) and "workload_rank_parallel" in item:
+            fields.append(bool(item["workload_rank_parallel"]))
+        else:
+            fields.append(None)
+    return fields
+
+
+def apply_workload_rank_parallel_default(
+    suite: WorkloadSuite,
+    default: bool | None,
+    *,
+    explicit_fields: list[bool | None] | None = None,
+) -> WorkloadSuite:
+    fields = explicit_fields or []
+    workloads: list[WorkloadSuiteItem] = []
+    changed = False
+    for index, item in enumerate(suite.workloads):
+        explicit_value = fields[index] if index < len(fields) else None
+        value = explicit_value if explicit_value is not None else default
+        if value is None:
+            workloads.append(item)
+            continue
+        bool_value = bool(value)
+        changed = changed or item.workload_rank_parallel != bool_value
+        workloads.append(item.model_copy(update={"workload_rank_parallel": bool_value}))
+    if not changed:
+        return suite
+    return suite.model_copy(update={"workloads": workloads}, deep=True)
+
+
 @dataclass(frozen=True)
 class WorkloadSuiteBaseline:
     suite_name: str

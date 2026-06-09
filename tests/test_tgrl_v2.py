@@ -16,6 +16,7 @@ from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback,
 from codesign_optimizer.optimizer.repair import CandidateRepairer
 from codesign_optimizer.optimizer.search_space import SearchSpace
 from codesign_optimizer.optimizer.tgrl import TGRLConfig, build_masked_actions
+from codesign_optimizer.optimizer.tgrl_v2 import ppo as ppo_module
 from codesign_optimizer.optimizer.tgrl_v2.model import TGRLGNNPolicy, policy_distribution
 from codesign_optimizer.optimizer.tgrl_v2.observation import (
     ACTION_FEATURE_DIM,
@@ -369,6 +370,59 @@ def test_model_forward_distribution_and_ppo_update() -> None:
 
     assert metrics["updates"] > 0
     assert any(not torch.allclose(old, new) for old, new in zip(before, model.parameters(), strict=True))
+
+
+def test_ppo_update_tensorizes_each_transition_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    device = torch.device("cpu")
+    observation = _observation()
+    model = TGRLGNNPolicy().to(device)
+    dist, _logits, value, _tensor_observation = policy_distribution(
+        model,
+        observation,
+        device=device,
+        heuristic_weight=1.0,
+    )
+    transitions = attach_gae(
+        [
+            [
+                PPOTransition(
+                    observation=observation,
+                    action_index=idx,
+                    old_logprob=float(dist.log_prob(torch.tensor(idx)).item()),
+                    value=float(value.item()),
+                    reward=1.0 + idx,
+                    done=False,
+                    candidate_signature=f"sig-{idx}",
+                    episode_env=0,
+                    rollout_step=idx,
+                )
+                for idx in range(2)
+            ]
+        ],
+        gamma=0.95,
+        gae_lambda=0.9,
+    )
+
+    calls = 0
+    original = ppo_module.tensorize_observation
+
+    def counted_tensorize(*args: object, **kwargs: object):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ppo_module, "tensorize_observation", counted_tensorize)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    ppo_update(
+        model=model,
+        optimizer=optimizer,
+        transitions=transitions,
+        config=PPOConfig(ppo_epochs=3, minibatch_size=1),
+        device=device,
+        rng=__import__("random").Random(1),
+    )
+
+    assert calls == len(transitions)
 
 
 def test_tgrl_v2_trainer_smoke_and_checkpoint_resume(tmp_path: Path) -> None:
