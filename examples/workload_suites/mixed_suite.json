@@ -1,0 +1,70 @@
+{
+  "name": "mixed_suite",
+  "metric": "makespan",
+  "workload_concurrency": 11,
+  "workloads": [
+    {
+      "name": "CoupCons3D",
+      "path": "tmp/sparse/CoupCons3D_pangulu_gstrf_workload_1024.json",
+      "weight": 1.0
+    },
+    {
+      "name": "apache2",
+      "path": "tmp/sparse/apache2_pangulu_gstrf_workload_1024.json",
+      "weight": 1.0
+    },
+    {
+      "name": "cg_bcsstk08_iter5",
+      "path": "tmp/sparse/cg_solver_bcsstk08_n1074_nnz12960_iter5.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "cg_bcsstk15_iter5",
+      "path": "tmp/sparse/cg_solver_bcsstk15_n3948_nnz117816_iter5.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "cg_bcsstk36_iter5",
+      "path": "tmp/sparse/cg_solver_bcsstk36_n23052_nnz1143140_iter5.json",
+      "weight": 1.0,
+      "workload_rank_parallel": true
+    },
+    {
+      "name": "ecology1",
+      "path": "tmp/sparse/ecology1_pangulu_gstrf_workload_1024.json",
+      "weight": 1.0
+    },
+    {
+      "name": "qwen",
+      "path": "mapper/examples/qwenconfig.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    },
+    {
+      "name": "llama",
+      "path": "mapper/examples/llama_config.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    },
+    {
+      "name": "gpt3",
+      "path": "mapper/examples/gpt3_config.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    },
+    {
+      "name": "gemma",
+      "path": "mapper/examples/gemma_config.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    },
+    {
+      "name": "mixtral",
+      "path": "mapper/examples/mixtral_config.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    }
+  ]
+}
