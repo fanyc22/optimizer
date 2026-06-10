@@ -29,6 +29,7 @@ parser.add_argument("--llm-tp")
 parser.add_argument("--llm-pp")
 parser.add_argument("--llm-cp")
 parser.add_argument("--llm-dp")
+parser.add_argument("--llm-use-all-gpus", action="store_true")
 parser.add_argument("--out")
 parser.add_argument("--mapper")
 parser.add_argument("--parallel")
@@ -61,6 +62,7 @@ summary = {
         "llm_prompt_len": args.llm_prompt_len,
         "llm_decode_steps": args.llm_decode_steps,
         "llm_tp": args.llm_tp,
+        "llm_use_all_gpus": args.llm_use_all_gpus,
         "topology": args.topology,
         "out": args.out,
         "calibration_fit_model": args.calibration_fit_model,
@@ -265,3 +267,32 @@ def test_pipeline_client_can_pass_llm_evaluation_args(tmp_path: Path) -> None:
     assert summary["inputs"]["llm_prompt_len"] == "128"
     assert summary["inputs"]["llm_decode_steps"] == "4"
     assert summary["inputs"]["llm_tp"] == "2"
+    assert summary["inputs"]["llm_use_all_gpus"] is False
+
+
+def test_pipeline_client_run_can_override_one_workload_as_llm_config(tmp_path: Path) -> None:
+    repo = _fake_repo(tmp_path)
+    topology = tmp_path / "topology.json"
+    llm_config = tmp_path / "qwenconfig.json"
+    topology.write_text("{}", encoding="utf-8")
+    llm_config.write_text("{}", encoding="utf-8")
+    out_dir = tmp_path / "case_suite_llm_config"
+
+    MapperSimulatorPipelineClient(
+        repo_root=repo,
+        evaluation=EvaluationSettings(workload_kind="mapper", workload_rank_parallel=True),
+        python=sys.executable,
+    ).run(
+        topology_path=topology,
+        workload_path=llm_config,
+        out_dir=out_dir,
+        workload_kind="llm-config",
+        workload_rank_parallel=False,
+        llm_use_all_gpus=True,
+    )
+
+    summary = json.loads((out_dir / "outputs" / "run_summary.json").read_text(encoding="utf-8"))
+    assert summary["inputs"]["workload"] == str(llm_config.resolve())
+    assert summary["inputs"]["llm_config"] == str(llm_config.resolve())
+    assert summary["inputs"]["llm_use_all_gpus"] is True
+    assert summary["inputs"]["workload_rank_parallel"] is False

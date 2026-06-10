@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from codesign_optimizer.optimizer.feedback_parser import (
     ParsedPipelineFeedback,
@@ -16,6 +16,8 @@ from codesign_optimizer.optimizer.search_space import EvaluationSettings
 
 logger = logging.getLogger(__name__)
 
+PipelineWorkloadKind = Literal["mapper", "llm"]
+
 
 class PipelineClient(Protocol):
     def run(
@@ -25,6 +27,8 @@ class PipelineClient(Protocol):
         workload_path: Path,
         out_dir: Path,
         workload_rank_parallel: bool | None = None,
+        workload_kind: str | None = None,
+        llm_use_all_gpus: bool | None = None,
     ) -> ParsedPipelineFeedback:
         ...
 
@@ -42,11 +46,16 @@ class MapperSimulatorPipelineClient:
         workload_path: Path,
         out_dir: Path,
         workload_rank_parallel: bool | None = None,
+        workload_kind: str | None = None,
+        llm_use_all_gpus: bool | None = None,
     ) -> ParsedPipelineFeedback:
         topology_path = topology_path.resolve()
         workload_path = workload_path.resolve()
         out_dir = out_dir.resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
+        effective_workload_kind = _normalize_pipeline_workload_kind(
+            workload_kind if workload_kind is not None else self.evaluation.workload_kind
+        )
         use_workload_rank_parallel = (
             self.evaluation.workload_rank_parallel
             if workload_rank_parallel is None
@@ -66,7 +75,7 @@ class MapperSimulatorPipelineClient:
             "--topology-format",
             self.evaluation.topology_format,
         ]
-        if self.evaluation.workload_kind == "llm":
+        if effective_workload_kind == "llm":
             cmd.extend(
                 [
                     "--llm-config",
@@ -91,6 +100,8 @@ class MapperSimulatorPipelineClient:
                     str(self.evaluation.llm_dp),
                 ]
             )
+            if llm_use_all_gpus:
+                cmd.append("--llm-use-all-gpus")
         else:
             cmd.extend(["--workload", str(workload_path)])
             if use_workload_rank_parallel:
@@ -142,6 +153,15 @@ def _resolve_repo_relative_path(repo_root: Path, path: Path) -> Path:
     if path.is_absolute():
         return path.resolve()
     return (repo_root / path).resolve()
+
+
+def _normalize_pipeline_workload_kind(value: str) -> PipelineWorkloadKind:
+    normalized = str(value).strip().lower().replace("_", "-")
+    if normalized in {"mapper", "workload", "taskgraph"}:
+        return "mapper"
+    if normalized in {"llm", "llm-config", "llmconfig"}:
+        return "llm"
+    raise ValueError("workload_kind must be one of: mapper, llm, llm-config")
 
 
 def _cleanup_large_wrapper_outputs(out_dir: Path) -> None:

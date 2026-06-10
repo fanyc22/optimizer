@@ -107,6 +107,8 @@ class RecordingPipeline:
         workload_path: Path,
         out_dir: Path,
         workload_rank_parallel: bool | None = None,
+        workload_kind: str | None = None,
+        llm_use_all_gpus: bool | None = None,
     ):
         self.calls.append(
             {
@@ -114,6 +116,8 @@ class RecordingPipeline:
                 "workload_path": workload_path,
                 "out_dir": out_dir,
                 "workload_rank_parallel": workload_rank_parallel,
+                "workload_kind": workload_kind,
+                "llm_use_all_gpus": llm_use_all_gpus,
             }
         )
         return _feedback(compute=0.9, network=0.1, workload=workload_path.stem)
@@ -134,7 +138,7 @@ def test_workload_suite_parser_normalizes_weights_and_resolves_paths(tmp_path: P
           "name": "mixed",
           "workloads": [
             {"name": "a", "path": "mapper/examples/a.json", "weight": 2, "workload_rank_parallel": true},
-            {"name": "b", "path": "mapper/examples/b.json"}
+            {"name": "b", "path": "mapper/examples/b.json", "kind": "llm-config"}
           ]
         }
         """,
@@ -150,7 +154,10 @@ def test_workload_suite_parser_normalizes_weights_and_resolves_paths(tmp_path: P
     assert pytest.approx(suite.workloads[1].weight or 0) == 1 / 3
     assert suite.workloads[0].workload_rank_parallel is True
     assert suite.workloads[1].workload_rank_parallel is False
+    assert suite.workloads[0].workload_kind == "mapper"
+    assert suite.workloads[1].workload_kind == "llm-config"
     assert suite.to_dict()["workloads"][0]["workload_rank_parallel"] is True
+    assert suite.to_dict()["workloads"][1]["workload_kind"] == "llm-config"
 
 
 def test_workload_rank_parallel_default_preserves_explicit_suite_values(tmp_path: Path) -> None:
@@ -211,6 +218,48 @@ def test_multi_workload_runner_passes_workload_rank_parallel_per_item(tmp_path: 
     payload = feedback.to_dict()
     assert payload["suite"]["workloads"][0]["workload_rank_parallel"] is True
     assert payload["workloads"][0]["workload_rank_parallel"] is True
+
+
+def test_multi_workload_runner_uses_llm_config_item_without_workload_rank_parallel(tmp_path: Path) -> None:
+    topology = tmp_path / "topology.json"
+    mapper_workload = tmp_path / "taskgraph.json"
+    llm_config = tmp_path / "qwenconfig.json"
+    topology.write_text("{}", encoding="utf-8")
+    mapper_workload.write_text("{}", encoding="utf-8")
+    llm_config.write_text("{}", encoding="utf-8")
+    suite = WorkloadSuite.model_validate(
+        {
+            "name": "mixed",
+            "workload_concurrency": 1,
+            "workloads": [
+                {"name": "mapper", "path": str(mapper_workload), "workload_rank_parallel": True},
+                {
+                    "name": "qwen",
+                    "path": str(llm_config),
+                    "workload_kind": "llm-config",
+                    "workload_rank_parallel": True,
+                },
+            ],
+        }
+    )
+    pipeline = RecordingPipeline()
+
+    feedback = MultiWorkloadPipelineRunner(pipeline, suite).run(
+        topology_path=topology,
+        out_dir=tmp_path / "out_llm",
+        baseline=None,
+    )
+
+    assert pipeline.calls[0]["workload_kind"] == "mapper"
+    assert pipeline.calls[0]["workload_rank_parallel"] is True
+    assert pipeline.calls[0]["llm_use_all_gpus"] is False
+    assert pipeline.calls[1]["workload_kind"] == "llm-config"
+    assert pipeline.calls[1]["workload_rank_parallel"] is False
+    assert pipeline.calls[1]["llm_use_all_gpus"] is True
+    payload = feedback.to_dict()
+    assert payload["suite"]["workloads"][1]["workload_kind"] == "llm-config"
+    assert payload["suite"]["workloads"][1]["workload_rank_parallel"] is False
+    assert payload["workloads"][1]["llm_use_all_gpus"] is True
 
 
 def test_workload_suite_parser_rejects_duplicate_names(tmp_path: Path) -> None:

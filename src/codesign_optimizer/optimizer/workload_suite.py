@@ -25,13 +25,40 @@ from codesign_optimizer.optimizer.pipeline_client import PipelineClient
 
 _EPS = 1e-9
 _FAILED_MAKESPAN_US = 1_000_000_000.0
+WorkloadItemKind = Literal["mapper", "llm-config"]
 
 
 class WorkloadSuiteItem(BaseModel):
     name: str
     path: Path
     weight: float | None = Field(default=None, gt=0)
+    workload_kind: WorkloadItemKind = "mapper"
     workload_rank_parallel: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_workload_kind(cls, payload: Any) -> Any:
+        if not isinstance(payload, dict):
+            return payload
+        data = dict(payload)
+        if "workload_kind" not in data:
+            for alias in ("kind", "type"):
+                if alias in data:
+                    data["workload_kind"] = data[alias]
+                    break
+        if "workload_kind" in data:
+            data["workload_kind"] = _normalize_workload_item_kind(data["workload_kind"])
+        return data
+
+    @property
+    def is_llm_config(self) -> bool:
+        return self.workload_kind == "llm-config"
+
+    @model_validator(mode="after")
+    def normalize_llm_rank_parallel(self) -> "WorkloadSuiteItem":
+        if self.is_llm_config:
+            self.workload_rank_parallel = False
+        return self
 
 
 class WorkloadSuite(BaseModel):
@@ -60,7 +87,11 @@ class WorkloadSuite(BaseModel):
     def signature(self) -> str:
         pieces = [self.name, self.metric, str(self.workload_concurrency)]
         for item in self.workloads:
-            pieces.append(f"{item.name}:{item.path}:{item.weight:.12f}:rank_parallel={item.workload_rank_parallel}")
+            piece = f"{item.name}:{item.path}:{item.weight:.12f}"
+            if item.workload_kind != "mapper":
+                piece += f":kind={item.workload_kind}"
+            piece += f":rank_parallel={item.workload_rank_parallel}"
+            pieces.append(piece)
         return "|".join(pieces)
 
     def to_dict(self) -> dict[str, Any]:
@@ -73,6 +104,7 @@ class WorkloadSuite(BaseModel):
                     "name": item.name,
                     "path": str(item.path),
                     "weight": item.weight,
+                    "workload_kind": item.workload_kind,
                     "workload_rank_parallel": item.workload_rank_parallel,
                 }
                 for item in self.workloads
@@ -105,6 +137,13 @@ def apply_workload_rank_parallel_default(
     workloads: list[WorkloadSuiteItem] = []
     changed = False
     for index, item in enumerate(suite.workloads):
+        if item.is_llm_config:
+            if item.workload_rank_parallel:
+                changed = True
+                workloads.append(item.model_copy(update={"workload_rank_parallel": False}))
+            else:
+                workloads.append(item)
+            continue
         explicit_value = fields[index] if index < len(fields) else None
         value = explicit_value if explicit_value is not None else default
         if value is None:
@@ -148,6 +187,8 @@ class WorkloadRunFeedback:
     workload_rank_parallel: bool
     out_dir: Path
     feedback: ParsedPipelineFeedback | None
+    workload_kind: WorkloadItemKind = "mapper"
+    llm_use_all_gpus: bool = False
     error: str = ""
     speedup: float = 1.0
     baseline_makespan_us: float | None = None
@@ -183,7 +224,9 @@ class WorkloadRunFeedback:
             "name": self.name,
             "path": str(self.path),
             "weight": self.weight,
+            "workload_kind": self.workload_kind,
             "workload_rank_parallel": self.workload_rank_parallel,
+            "llm_use_all_gpus": self.llm_use_all_gpus,
             "success": self.success,
             "makespan_us": self.makespan_us,
             "score": self.makespan_us,
@@ -302,7 +345,9 @@ class MultiWorkloadPipelineRunner:
                     name=item.name,
                     path=item.path,
                     weight=item.weight,
+                    workload_kind=item.workload_kind,
                     workload_rank_parallel=item.workload_rank_parallel,
+                    llm_use_all_gpus=item.llm_use_all_gpus,
                     out_dir=item.out_dir,
                     feedback=item.feedback,
                     error=item.error,
@@ -325,7 +370,9 @@ class MultiWorkloadPipelineRunner:
                 name=workload.name,
                 path=workload.path,
                 weight=float(workload.weight or 0.0),
+                workload_kind=workload.workload_kind,
                 workload_rank_parallel=workload.workload_rank_parallel,
+                llm_use_all_gpus=workload.is_llm_config,
                 out_dir=workload_dir,
                 feedback=feedback,
             )
@@ -334,7 +381,9 @@ class MultiWorkloadPipelineRunner:
                 name=workload.name,
                 path=workload.path,
                 weight=float(workload.weight or 0.0),
+                workload_kind=workload.workload_kind,
                 workload_rank_parallel=workload.workload_rank_parallel,
+                llm_use_all_gpus=workload.is_llm_config,
                 out_dir=workload_dir,
                 feedback=None,
                 error=str(exc),
@@ -353,7 +402,9 @@ class MultiWorkloadPipelineRunner:
                 name=workload.name,
                 path=workload.path,
                 weight=float(workload.weight or 0.0),
+                workload_kind=workload.workload_kind,
                 workload_rank_parallel=workload.workload_rank_parallel,
+                llm_use_all_gpus=workload.is_llm_config,
                 out_dir=workload_dir,
                 feedback=feedback,
             )
@@ -362,7 +413,9 @@ class MultiWorkloadPipelineRunner:
                 name=workload.name,
                 path=workload.path,
                 weight=float(workload.weight or 0.0),
+                workload_kind=workload.workload_kind,
                 workload_rank_parallel=workload.workload_rank_parallel,
+                llm_use_all_gpus=workload.is_llm_config,
                 out_dir=workload_dir,
                 feedback=None,
                 error=str(exc),
@@ -373,7 +426,9 @@ class MultiWorkloadPipelineRunner:
             topology_path=topology_path,
             workload_path=workload.path,
             out_dir=out_dir,
-            workload_rank_parallel=workload.workload_rank_parallel,
+            workload_kind=workload.workload_kind,
+            workload_rank_parallel=False if workload.is_llm_config else workload.workload_rank_parallel,
+            llm_use_all_gpus=workload.is_llm_config,
         )
 
 
@@ -506,6 +561,15 @@ def _resolve_workload_path(path: Path, *, suite_path: Path, repo_root: Path) -> 
     if repo_relative.exists():
         return repo_relative
     return suite_path.parent / path
+
+
+def _normalize_workload_item_kind(value: Any) -> WorkloadItemKind:
+    normalized = str(value).strip().lower().replace("_", "-")
+    if normalized in {"mapper", "workload", "taskgraph"}:
+        return "mapper"
+    if normalized in {"llm", "llm-config", "llmconfig"}:
+        return "llm-config"
+    raise ValueError("workload_kind must be one of: mapper, llm-config")
 
 
 def _average_compute_utilization(feedback: ParsedPipelineFeedback) -> float:

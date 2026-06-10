@@ -1,0 +1,37 @@
+{
+  "name": "llm_config_suite",
+  "metric": "makespan",
+  "workload_concurrency": 5,
+  "workloads": [
+    {
+      "name": "qwen",
+      "path": "mapper/examples/qwenconfig.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    },
+    {
+      "name": "llama",
+      "path": "mapper/examples/llama_config.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    },
+    {
+      "name": "gpt3",
+      "path": "mapper/examples/gpt3_config.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    },
+    {
+      "name": "gemma",
+      "path": "mapper/examples/gemma_config.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    },
+    {
+      "name": "mixtral",
+      "path": "mapper/examples/mixtral_config.json",
+      "weight": 1.0,
+      "workload_kind": "llm-config"
+    }
+  ]
+}
