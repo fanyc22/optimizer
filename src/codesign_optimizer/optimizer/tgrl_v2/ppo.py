@@ -11,7 +11,8 @@ import torch.nn.functional as F
 from codesign_optimizer.optimizer.tgrl_v2.model import (
     TensorObservation,
     TGRLGNNPolicy,
-    policy_distribution_from_tensor,
+    batch_tensor_observations,
+    policy_logits_from_batched_tensor,
     tensorize_observation,
 )
 from codesign_optimizer.optimizer.tgrl_v2.observation import GraphObservation
@@ -70,6 +71,7 @@ class _PreparedPPOTransition:
     advantage: torch.Tensor
     return_value: torch.Tensor
     prior_probs: torch.Tensor
+    action_count: int
 
 
 def attach_gae(
@@ -139,13 +141,22 @@ def ppo_update(
             batch_value_loss = 0.0
             batch_entropy = 0.0
             batch_kl = 0.0
-            for idx in batch_indices:
-                prepared_transition = prepared[idx]
-                dist, _logits, value = policy_distribution_from_tensor(
-                    model,
-                    prepared_transition.tensor_observation,
-                    heuristic_weight=config.heuristic_weight,
+            prepared_batch = [prepared[idx] for idx in batch_indices]
+            batched_observation = batch_tensor_observations(
+                [item.tensor_observation for item in prepared_batch]
+            )
+            batched_logits, batched_values = policy_logits_from_batched_tensor(
+                model,
+                batched_observation,
+                heuristic_weight=config.heuristic_weight,
+            )
+            action_offset = 0
+            for local_idx, prepared_transition in enumerate(prepared_batch):
+                next_action_offset = action_offset + prepared_transition.action_count
+                dist = torch.distributions.Categorical(
+                    logits=batched_logits[action_offset:next_action_offset]
                 )
+                value = batched_values[local_idx]
                 new_logprob = dist.log_prob(prepared_transition.action)
                 ratio = torch.exp(new_logprob - prepared_transition.old_logprob)
                 unclipped = ratio * prepared_transition.advantage
@@ -160,6 +171,7 @@ def ppo_update(
                 kl_prior = torch.sum(
                     policy_probs * (torch.log(policy_probs) - torch.log(prepared_transition.prior_probs))
                 )
+                action_offset = next_action_offset
                 loss = (
                     policy_loss
                     + config.value_coef * value_loss
@@ -205,6 +217,7 @@ def _prepare_transitions(transitions: list[PPOTransition], *, device: torch.devi
                 advantage=torch.tensor(transition.advantage, dtype=torch.float32, device=device),
                 return_value=torch.tensor(transition.return_value, dtype=torch.float32, device=device),
                 prior_probs=torch.softmax(tensor_observation.heuristic_logits, dim=0).clamp_min(1e-9),
+                action_count=int(tensor_observation.action_features.shape[0]),
             )
         )
     return prepared

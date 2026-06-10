@@ -17,7 +17,14 @@ from codesign_optimizer.optimizer.repair import CandidateRepairer
 from codesign_optimizer.optimizer.search_space import SearchSpace
 from codesign_optimizer.optimizer.tgrl import TGRLConfig, build_masked_actions
 from codesign_optimizer.optimizer.tgrl_v2 import ppo as ppo_module
-from codesign_optimizer.optimizer.tgrl_v2.model import TGRLGNNPolicy, policy_distribution
+from codesign_optimizer.optimizer.tgrl_v2.model import (
+    TensorObservation,
+    TGRLGNNPolicy,
+    batch_tensor_observations,
+    policy_distribution,
+    policy_logits_from_batched_tensor,
+    tensorize_observation,
+)
 from codesign_optimizer.optimizer.tgrl_v2.observation import (
     ACTION_FEATURE_DIM,
     EDGE_FEATURE_DIM,
@@ -372,6 +379,62 @@ def test_model_forward_distribution_and_ppo_update() -> None:
     assert any(not torch.allclose(old, new) for old, new in zip(before, model.parameters(), strict=True))
 
 
+def test_batched_model_forward_matches_single_forward_and_keeps_checkpoint_keys() -> None:
+    device = torch.device("cpu")
+    observation = tensorize_observation(_observation(), device)
+    small_observation = TensorObservation(
+        node_features=torch.stack(
+            [
+                torch.arange(NODE_FEATURE_DIM, dtype=torch.float32, device=device) / 100.0,
+                torch.arange(NODE_FEATURE_DIM, dtype=torch.float32, device=device).flip(0) / 100.0,
+                torch.ones(NODE_FEATURE_DIM, dtype=torch.float32, device=device) * 0.25,
+            ],
+            dim=0,
+        ),
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long, device=device),
+        edge_features=torch.stack(
+            [
+                torch.arange(EDGE_FEATURE_DIM, dtype=torch.float32, device=device) / 10.0,
+                torch.ones(EDGE_FEATURE_DIM, dtype=torch.float32, device=device) * 0.5,
+                torch.zeros(EDGE_FEATURE_DIM, dtype=torch.float32, device=device),
+            ],
+            dim=0,
+        ),
+        global_features=torch.arange(GLOBAL_FEATURE_DIM, dtype=torch.float32, device=device) / 50.0,
+        action_features=torch.stack(
+            [
+                torch.arange(ACTION_FEATURE_DIM, dtype=torch.float32, device=device) / 100.0,
+                torch.ones(ACTION_FEATURE_DIM, dtype=torch.float32, device=device) * 0.1,
+            ],
+            dim=0,
+        ),
+        action_target_indices=torch.tensor([0, 2], dtype=torch.long, device=device),
+        heuristic_logits=torch.tensor([0.25, -0.5], dtype=torch.float32, device=device),
+    )
+    model = TGRLGNNPolicy().to(device)
+    checkpoint_keys = tuple(model.state_dict().keys())
+
+    single_logits_a, single_value_a = model(observation)
+    single_logits_a = single_logits_a + observation.heuristic_logits
+    single_logits_b, single_value_b = model(small_observation)
+    single_logits_b = single_logits_b + small_observation.heuristic_logits
+    batched = batch_tensor_observations([observation, small_observation])
+    batched_logits, batched_values = policy_logits_from_batched_tensor(
+        model,
+        batched,
+        heuristic_weight=1.0,
+    )
+
+    split = int(observation.action_features.shape[0])
+    torch.testing.assert_close(batched_logits[:split], single_logits_a, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(batched_logits[split:], single_logits_b, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(batched_values[0], single_value_a, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(batched_values[1], single_value_b, rtol=1e-5, atol=1e-6)
+    assert tuple(model.state_dict().keys()) == checkpoint_keys
+    reloaded = TGRLGNNPolicy().to(device)
+    reloaded.load_state_dict(model.state_dict(), strict=True)
+
+
 def test_ppo_update_tensorizes_each_transition_once(monkeypatch: pytest.MonkeyPatch) -> None:
     device = torch.device("cpu")
     observation = _observation()
@@ -423,6 +486,58 @@ def test_ppo_update_tensorizes_each_transition_once(monkeypatch: pytest.MonkeyPa
     )
 
     assert calls == len(transitions)
+
+
+def test_ppo_update_uses_one_batched_forward_per_minibatch() -> None:
+    class CountingPolicy(TGRLGNNPolicy):
+        def __init__(self) -> None:
+            super().__init__()
+            self.batched_calls = 0
+
+        def forward_batched(self, observation):
+            self.batched_calls += 1
+            return super().forward_batched(observation)
+
+    device = torch.device("cpu")
+    observation = _observation()
+    model = CountingPolicy().to(device)
+    dist, _logits, value, _tensor_observation = policy_distribution(
+        model,
+        observation,
+        device=device,
+        heuristic_weight=1.0,
+    )
+    transitions = attach_gae(
+        [
+            [
+                PPOTransition(
+                    observation=observation,
+                    action_index=idx,
+                    old_logprob=float(dist.log_prob(torch.tensor(idx)).item()),
+                    value=float(value.item()),
+                    reward=1.0 + idx,
+                    done=False,
+                    candidate_signature=f"sig-{idx}",
+                    episode_env=0,
+                    rollout_step=idx,
+                )
+                for idx in range(2)
+            ]
+        ],
+        gamma=0.95,
+        gae_lambda=0.9,
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    ppo_update(
+        model=model,
+        optimizer=optimizer,
+        transitions=transitions,
+        config=PPOConfig(ppo_epochs=3, minibatch_size=2),
+        device=device,
+        rng=__import__("random").Random(1),
+    )
+
+    assert model.batched_calls == 3
 
 
 def test_tgrl_v2_trainer_smoke_and_checkpoint_resume(tmp_path: Path) -> None:
