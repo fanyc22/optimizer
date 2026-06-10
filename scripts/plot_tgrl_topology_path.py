@@ -320,6 +320,43 @@ def mark_plotted_rows(rows: list[MetricRow], *, dedupe_tol: float) -> list[Metri
     return plotted
 
 
+def _adaptive_axis_range(
+    values: list[float],
+    *,
+    projection_side: str,
+    data_pad_fraction: float = 0.08,
+    projection_gap_fraction: float = 0.12,
+) -> tuple[float, float, float]:
+    if not values:
+        raise ValueError("cannot compute axis range for an empty value list")
+
+    data_min = min(values)
+    data_max = max(values)
+    data_span = data_max - data_min
+    if data_span <= 0:
+        reference = max(abs(data_min), abs(data_max), 1.0)
+        half_span = reference * 0.05
+        data_min -= half_span
+        data_max += half_span
+        data_span = data_max - data_min
+
+    data_pad = data_span * data_pad_fraction
+    projection_gap = data_span * projection_gap_fraction
+    lower = data_min - data_pad
+    upper = data_max + data_pad
+
+    if projection_side == "low":
+        projection_coord = lower - projection_gap
+        lower = projection_coord
+    elif projection_side == "high":
+        projection_coord = upper + projection_gap
+        upper = projection_coord
+    else:
+        raise ValueError(f"unsupported projection_side: {projection_side}")
+
+    return lower, upper, projection_coord
+
+
 def write_csv(rows: list[MetricRow], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -373,16 +410,9 @@ def plot_trajectory(rows: list[MetricRow], out_path: Path, *, title: str, dpi: i
     scatter = ax.scatter(xs, ys, zs, c=updates, cmap="viridis", s=48, depthshade=True)
     ax.plot(xs, ys, zs, color="#333333", linewidth=1.3, alpha=0.65)
 
-    x_floor = min(xs)
-    y_floor = min(ys)
-    y_ceiling = max(ys)
-    z_floor = min(zs)
-    x_padding = max((max(xs) - x_floor) * 0.08, 0.03)
-    y_padding = max((y_ceiling - y_floor) * 0.08, 5.0)
-    z_padding = max((max(zs) - z_floor) * 0.08, 0.08)
-    x_shadow = x_floor - x_padding
-    y_shadow = y_ceiling + y_padding
-    z_shadow = z_floor - z_padding
+    x_lower, x_upper, x_shadow = _adaptive_axis_range(xs, projection_side="low")
+    y_lower, y_upper, y_shadow = _adaptive_axis_range(ys, projection_side="high")
+    z_lower, z_upper, z_shadow = _adaptive_axis_range(zs, projection_side="low")
 
     ax.plot(
         xs,
@@ -429,9 +459,9 @@ def plot_trajectory(rows: list[MetricRow], out_path: Path, *, title: str, dpi: i
     ax.set_xlabel("link_count / node_count")
     ax.set_ylabel("average link bandwidth (Gbps)")
     ax.set_zlabel("CPU peak TFLOPS / GPU peak TFLOPS")
-    ax.set_xlim(x_shadow, max(xs))
-    ax.set_ylim(y_floor, y_shadow)
-    ax.set_zlim(z_shadow, max(zs))
+    ax.set_xlim(x_lower, x_upper)
+    ax.set_ylim(y_lower, y_upper)
+    ax.set_zlim(z_lower, z_upper)
     ax.view_init(elev=24, azim=-58)
     ax.set_box_aspect((1.15, 1.15, 0.9))
     ax.set_title(title)
