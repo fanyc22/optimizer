@@ -28,7 +28,7 @@ from codesign_optimizer.optimizer.scoring import (
     tgrl_v2_objectives,
     weighted_score_from_objectives,
 )
-from codesign_optimizer.optimizer.search_space import SearchObjectiveWeights, SearchSpace
+from codesign_optimizer.optimizer.search_space import SearchLimits, SearchObjectiveWeights, SearchSpace
 from codesign_optimizer.optimizer.tgrl import (
     MaskedAction,
     TGRLConfig,
@@ -176,7 +176,7 @@ class TGRLPPOTrainer:
         return self._best_score
 
     def per_workload_single_task_scores(self, evaluation: TGRLEvaluation) -> list[dict[str, Any]]:
-        return per_workload_single_task_scores(evaluation, self._space.objective_weights)
+        return per_workload_single_task_scores(evaluation, self._space.objective_weights, self._space.limits)
 
     def run(self) -> TGRLPPOResult:
         self._out_dir.mkdir(parents=True, exist_ok=True)
@@ -964,6 +964,7 @@ class TGRLPPOTrainer:
         return weighted_score_from_objectives(
             objectives,
             weights=self._space.objective_weights,
+            limits=self._space.limits,
             feasible=feasible,
             penalty=penalty,
         )
@@ -1049,6 +1050,7 @@ class TGRLPPOTrainer:
                 "per_workload_single_task_scores": per_workload_single_task_scores(
                     best,
                     self._space.objective_weights,
+                    self._space.limits,
                 ),
             },
         )
@@ -1081,6 +1083,7 @@ class TGRLPPOTrainer:
             history,
             ordinal_offset=len(previous_candidate_rows),
             weights=self._space.objective_weights,
+            limits=self._space.limits,
         )
         dump_json(curve_dir / "candidate_scores.json", {"rows": candidate_rows})
         dump_json(curve_dir / "update_scores.json", {"rows": update_rows})
@@ -1364,6 +1367,7 @@ def _suite_log_makespan_score(feedback: MultiWorkloadFeedback | None) -> float |
 def per_workload_single_task_scores(
     evaluation: TGRLEvaluation,
     weights: SearchObjectiveWeights,
+    limits: SearchLimits | None = None,
 ) -> list[dict[str, Any]]:
     if evaluation.suite_feedback is None:
         return []
@@ -1379,6 +1383,7 @@ def per_workload_single_task_scores(
                 "single_task_score": _weighted_score_from_objectives(
                     objectives,
                     weights=weights,
+                    limits=limits,
                     feasible=feasible,
                     penalty=evaluation.repair.penalty,
                 ),
@@ -1410,12 +1415,14 @@ def _weighted_score_from_objectives(
     objectives: tuple[float, float, float, float, float, float],
     *,
     weights: SearchObjectiveWeights,
+    limits: SearchLimits | None = None,
     feasible: bool,
     penalty: float,
 ) -> float:
     return weighted_score_from_objectives(
         objectives,
         weights=weights,
+        limits=limits,
         feasible=feasible,
         penalty=penalty,
     )
@@ -1467,6 +1474,7 @@ def _workload_score_rows(
     *,
     ordinal_offset: int = 0,
     weights: SearchObjectiveWeights | None = None,
+    limits: SearchLimits | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for ordinal, evaluation in enumerate(history):
@@ -1475,7 +1483,7 @@ def _workload_score_rows(
         single_task_scores = (
             {
                 item["workload"]: item
-                for item in per_workload_single_task_scores(evaluation, weights)
+                for item in per_workload_single_task_scores(evaluation, weights, limits)
             }
             if weights is not None
             else {}

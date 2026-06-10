@@ -24,7 +24,8 @@ from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback
 from codesign_optimizer.optimizer.link_scope import LinkScope, link_type_allowed_for_scope, link_types_for_scope
 from codesign_optimizer.optimizer.pipeline_client import PipelineClient
 from codesign_optimizer.optimizer.repair import CandidateRepairer, RepairReport
-from codesign_optimizer.optimizer.search_space import SearchObjectiveWeights, SearchSpace
+from codesign_optimizer.optimizer.scoring import weighted_score_from_objectives
+from codesign_optimizer.optimizer.search_space import SearchSpace
 
 
 logger = logging.getLogger(__name__)
@@ -855,18 +856,13 @@ class TCROSearchRunner:
         feasible: bool,
         penalty: float,
     ) -> float:
-        weights: SearchObjectiveWeights = self._space.objective_weights
-        score = (
-            weights.makespan * (objectives[0] / 10_000.0)
-            + weights.cost * (objectives[1] / 1_000_000.0)
-            + weights.power * (objectives[2] / 100_000.0)
-            + weights.max_link_utilization * objectives[3]
-            + weights.max_queue_delay * (objectives[4] / 1_000_000.0)
-            + weights.remote_memory_contention * (objectives[5] / 1_000_000.0)
+        return weighted_score_from_objectives(
+            objectives,
+            weights=self._space.objective_weights,
+            limits=self._space.limits,
+            feasible=feasible,
+            penalty=penalty,
         )
-        if not feasible:
-            score += 1_000_000.0 + penalty
-        return score
 
     def _cached_evaluation(self, signature: str) -> TCROCandidateEvaluation | None:
         with self._cache_lock:

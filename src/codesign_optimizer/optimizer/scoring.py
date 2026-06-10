@@ -4,7 +4,7 @@ from typing import Any
 
 from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback
 from codesign_optimizer.optimizer.repair import RepairReport
-from codesign_optimizer.optimizer.search_space import SearchObjectiveWeights
+from codesign_optimizer.optimizer.search_space import SearchLimits, SearchObjectiveWeights
 
 
 ObjectiveTuple = tuple[float, float, float, float, float, float]
@@ -13,6 +13,23 @@ FAILED_MAKESPAN_US = 1_000_000_000.0
 FAILED_LINK_UTILIZATION = 1_000_000.0
 FAILED_QUEUE_NS = 1_000_000_000.0
 INFEASIBLE_PENALTY = 1_000_000_000.0
+
+
+def budget_wall_pressure(
+    value: float,
+    limit: float,
+    *,
+    weights: SearchObjectiveWeights,
+) -> float:
+    if limit <= 0:
+        return 0.0 if value <= 0 else float("inf")
+    utilization = max(0.0, value / limit)
+    pressure = weights.budget_tiebreak * utilization
+    if utilization <= weights.budget_wall_knee:
+        return pressure
+    span = max(1e-12, 1.0 - weights.budget_wall_knee)
+    wall = ((utilization - weights.budget_wall_knee) / span) ** weights.budget_wall_exponent
+    return pressure + wall
 
 
 def penalty_objectives(repair: RepairReport) -> ObjectiveTuple:
@@ -73,13 +90,24 @@ def weighted_score_from_objectives(
     objectives: ObjectiveTuple,
     *,
     weights: SearchObjectiveWeights,
+    limits: SearchLimits | None = None,
     feasible: bool,
     penalty: float,
 ) -> float:
+    cost_pressure = (
+        budget_wall_pressure(objectives[1], limits.max_total_cost, weights=weights)
+        if limits is not None
+        else objectives[1] / 1_000_000.0
+    )
+    power_pressure = (
+        budget_wall_pressure(objectives[2], limits.max_peak_power_watts, weights=weights)
+        if limits is not None
+        else objectives[2] / 100_000.0
+    )
     score = (
         weights.makespan * (objectives[0] / 10_000.0)
-        + weights.cost * (objectives[1] / 1_000_000.0)
-        + weights.power * (objectives[2] / 100_000.0)
+        + weights.cost * cost_pressure
+        + weights.power * power_pressure
         + weights.max_link_utilization * objectives[3]
         + weights.max_queue_delay * (objectives[4] / 1_000_000.0)
         + weights.remote_memory_contention * (objectives[5] / 1_000_000.0)

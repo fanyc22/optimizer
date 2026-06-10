@@ -14,6 +14,7 @@ from codesign_optimizer.optimizer.chromosome import chromosome_from_template
 from codesign_optimizer.optimizer.exporter import HardwareTopologyExporter
 from codesign_optimizer.optimizer.feedback_parser import ParsedPipelineFeedback, parse_pipeline_feedback
 from codesign_optimizer.optimizer.repair import CandidateRepairer
+from codesign_optimizer.optimizer.scoring import budget_wall_pressure
 from codesign_optimizer.optimizer.search_space import SearchSpace
 from codesign_optimizer.optimizer.tgrl import TGRLConfig, build_masked_actions
 from codesign_optimizer.optimizer.tgrl_v2 import ppo as ppo_module
@@ -716,9 +717,10 @@ def test_tgrl_v2_trainer_runs_workload_suite(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     fake_pipeline = FakePipeline(remote_queue=1_000_000, delay_s=0.01)
+    space = _space()
     trainer = TGRLPPOTrainer(
         component_library=_library(),
-        search_space=_space(),
+        search_space=space,
         pipeline_client=fake_pipeline,
         workload_path=None,
         workload_suite=suite,
@@ -743,13 +745,20 @@ def test_tgrl_v2_trainer_runs_workload_suite(tmp_path: Path) -> None:
     assert summary["workload_suite"]["name"] == "mixed"
     assert {row["workload"] for row in summary["per_workload_single_task_scores"]} == {"a", "b"}
     score_row = summary["per_workload_single_task_scores"][0]
+    weights = space.objective_weights
     expected_single_task_score = (
-        score_row["makespan_us"] / 10_000.0
-        + 0.15 * (score_row["estimated_cost"] / 1_000_000.0)
-        + 0.10 * (score_row["estimated_power_watts"] / 100_000.0)
-        + 0.20 * score_row["max_link_utilization"]
-        + 0.20 * (score_row["max_queue_delay_ns"] / 1_000_000.0)
-        + 0.10 * (score_row["remote_memory_contention_ns"] / 1_000_000.0)
+        weights.makespan * (score_row["makespan_us"] / 10_000.0)
+        + weights.cost
+        * budget_wall_pressure(score_row["estimated_cost"], space.limits.max_total_cost, weights=weights)
+        + weights.power
+        * budget_wall_pressure(
+            score_row["estimated_power_watts"],
+            space.limits.max_peak_power_watts,
+            weights=weights,
+        )
+        + weights.max_link_utilization * score_row["max_link_utilization"]
+        + weights.max_queue_delay * (score_row["max_queue_delay_ns"] / 1_000_000.0)
+        + weights.remote_memory_contention * (score_row["remote_memory_contention_ns"] / 1_000_000.0)
     )
     assert pytest.approx(score_row["single_task_score"]) == expected_single_task_score
     rows = json.loads((out_dir / "curves" / "candidate_scores.json").read_text(encoding="utf-8"))["rows"]

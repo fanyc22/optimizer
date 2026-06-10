@@ -259,6 +259,7 @@ class ExhaustiveSearchRunner:
                 weighted_score=weighted_score_from_objectives(
                     objectives,
                     weights=self._space.objective_weights,
+                    limits=self._space.limits,
                     feasible=False,
                     penalty=repair.penalty,
                 ),
@@ -295,6 +296,7 @@ class ExhaustiveSearchRunner:
             weighted_score=weighted_score_from_objectives(
                 objectives,
                 weights=self._space.objective_weights,
+                limits=self._space.limits,
                 feasible=feasible,
                 penalty=repair.penalty,
             ),
