@@ -1,3 +1,4 @@
+import json
 import random
 import threading
 import time
@@ -336,6 +337,75 @@ def test_heuristic_search_evaluates_candidates_concurrently(tmp_path: Path) -> N
     assert pipeline.calls > 0
     assert pipeline.max_active >= 2
     assert (tmp_path / "parallel_search" / "summary.json").exists()
+
+
+def test_random_search_strategy_runs_with_fake_pipeline(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    pipeline = FakePipelineClient()
+    out_dir = tmp_path / "random_search"
+    runner = HeuristicSearchRunner(
+        component_library=_library(),
+        search_space=_space(),
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=out_dir,
+        population_size=4,
+        generations=2,
+        strategy="random",
+    )
+
+    result = runner.run()
+    summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert result.best.feasible
+    assert summary["strategy"] == "random"
+    assert summary["evaluations"] == 8
+    assert (out_dir / "iter_001" / "generation_summary.json").exists()
+
+
+def test_greedy_search_strategy_reuses_best_as_next_seed(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+    pipeline = FakePipelineClient()
+    out_dir = tmp_path / "greedy_search"
+    runner = HeuristicSearchRunner(
+        component_library=_library(),
+        search_space=_space(),
+        pipeline_client=pipeline,
+        workload_path=workload,
+        out_dir=out_dir,
+        population_size=4,
+        generations=2,
+        strategy="greedy",
+    )
+
+    result = runner.run()
+    summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+    next_seed = json.loads(
+        (out_dir / "iter_001" / "candidate_000" / "score.json").read_text(encoding="utf-8")
+    )
+
+    assert result.best.feasible
+    assert summary["strategy"] == "greedy"
+    assert next_seed["cache_hit"]
+
+
+def test_heuristic_search_rejects_unknown_strategy(tmp_path: Path) -> None:
+    workload = tmp_path / "workload.json"
+    workload.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unknown search strategy"):
+        HeuristicSearchRunner(
+            component_library=_library(),
+            search_space=_space(),
+            pipeline_client=FakePipelineClient(),
+            workload_path=workload,
+            out_dir=tmp_path / "bad_search",
+            population_size=4,
+            generations=1,
+            strategy="beam",  # type: ignore[arg-type]
+        )
 
 
 def test_heterogeneous_rack_search_runs_with_fake_pipeline(tmp_path: Path) -> None:

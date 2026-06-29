@@ -11,7 +11,7 @@ from codesign_optimizer.config.settings import OptimizerSettings
 from codesign_optimizer.io.jsonc import load_jsonc
 from codesign_optimizer.models.hardware import HardwareProposal
 from codesign_optimizer.models.workload import WorkloadSpec
-from codesign_optimizer.optimizer.evolutionary import HeuristicSearchRunner
+from codesign_optimizer.optimizer.evolutionary import SEARCH_STRATEGIES, HeuristicSearchRunner
 from codesign_optimizer.optimizer.exhaustive import ExhaustiveSearchRunner
 from codesign_optimizer.optimizer.orchestrator import CoDesignOrchestrator
 from codesign_optimizer.optimizer.pipeline_client import MapperSimulatorPipelineClient
@@ -89,6 +89,10 @@ def search_optimizer(
     ),
     generations: int = typer.Option(4, min=1, max=1000, help="Number of generations."),
     population: int = typer.Option(8, min=1, max=10000, help="Population size."),
+    strategy: str = typer.Option(
+        "evolutionary",
+        help="Candidate generation strategy: evolutionary, random, or greedy.",
+    ),
     concurrency: int = typer.Option(
         1,
         min=1,
@@ -104,6 +108,9 @@ def search_optimizer(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
 ) -> None:
     configure_logging(verbose=verbose)
+    if strategy not in SEARCH_STRATEGIES:
+        console.print("[red]--strategy must be one of: evolutionary, random, greedy[/red]")
+        raise typer.Exit(code=2)
 
     component_library = load_component_library(load_jsonc(catalog))
     search_space = SearchSpace.model_validate(load_jsonc(space))
@@ -118,6 +125,7 @@ def search_optimizer(
         population_size=population,
         generations=generations,
         concurrency=concurrency,
+        strategy=strategy,  # type: ignore[arg-type]
     )
     result = runner.run()
     visualization = _visualization_summary(
@@ -128,6 +136,7 @@ def search_optimizer(
     )
     console.print(
         "[green]Heuristic search completed[/green]\n"
+        f"Strategy: {strategy}\n"
         f"Generations: {generations}\n"
         f"Population: {population}\n"
         f"Concurrency: {concurrency}\n"

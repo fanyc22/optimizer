@@ -181,7 +181,9 @@
     "sim_extra": [],
     "mapper_extra": [],
     "scaling_report": false,
+    "calibration_fit_model": "calibration/calibration_fit_model.json",
     "timeout_seconds": 7200,
     "cleanup_wrapper_intermediate": true
+
   }
 }

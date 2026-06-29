@@ -7,12 +7,13 @@ import random
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from codesign_optimizer.io.jsonc import dump_json
 from codesign_optimizer.models.hardware import ComponentLibrary
 from codesign_optimizer.optimizer.chromosome import (
     Chromosome,
+    chromosome_from_template,
     crossover,
     initial_population,
     mutate_random,
@@ -26,6 +27,9 @@ from codesign_optimizer.optimizer.search_space import SearchSpace
 
 
 logger = logging.getLogger(__name__)
+
+SearchStrategy = Literal["evolutionary", "random", "greedy"]
+SEARCH_STRATEGIES: set[str] = {"evolutionary", "random", "greedy"}
 
 
 @dataclass
@@ -85,9 +89,13 @@ class HeuristicSearchRunner:
         population_size: int,
         generations: int,
         concurrency: int = 1,
+        strategy: SearchStrategy = "evolutionary",
     ) -> None:
         if search_space.mutation.search_granularity == "host":
             raise ValueError("host search_granularity is currently supported only by TG-RL/TG-RL v2")
+        if strategy not in SEARCH_STRATEGIES:
+            choices = ", ".join(sorted(SEARCH_STRATEGIES))
+            raise ValueError(f"unknown search strategy {strategy!r}; expected one of: {choices}")
         self._library = component_library
         self._space = search_space
         self._pipeline = pipeline_client
@@ -96,6 +104,7 @@ class HeuristicSearchRunner:
         self._population_size = population_size
         self._generations = generations
         self._concurrency = max(1, concurrency)
+        self._strategy = strategy
         self._rng = random.Random(search_space.seed)
         self._exporter = HardwareTopologyExporter(component_library)
         self._repairer = CandidateRepairer(component_library, search_space)
@@ -107,7 +116,8 @@ class HeuristicSearchRunner:
         population = initial_population(self._space, self._population_size, self._rng)
         history: list[CandidateEvaluation] = []
         logger.info(
-            "Starting heuristic search: generations=%d population=%d concurrency=%d templates=%d out=%s",
+            "Starting heuristic search: strategy=%s generations=%d population=%d concurrency=%d templates=%d out=%s",
+            self._strategy,
             self._generations,
             self._population_size,
             self._concurrency,
@@ -140,10 +150,11 @@ class HeuristicSearchRunner:
             if generation + 1 < self._generations:
                 population = self._make_next_population(selected, self._population_size)
                 logger.info(
-                    "Generation %d/%d: produced next population with %d candidates",
+                    "Generation %d/%d: produced next population with %d candidates using %s strategy",
                     generation + 2,
                     self._generations,
                     len(population),
+                    self._strategy,
                 )
 
         rank_fronts(history)
@@ -406,6 +417,10 @@ class HeuristicSearchRunner:
         selected: list[CandidateEvaluation],
         population_size: int,
     ) -> list[Chromosome]:
+        if self._strategy == "random":
+            return self._make_random_population(population_size)
+        if self._strategy == "greedy":
+            return self._make_greedy_population(selected, population_size)
         if not selected:
             return initial_population(self._space, population_size, self._rng)
         next_population = [item.chromosome.model_copy(deep=True) for item in selected[: self._elite_count()]]
@@ -419,6 +434,54 @@ class HeuristicSearchRunner:
                 child = mutate_random(child, self._space, self._rng)
             next_population.append(child)
         return next_population[:population_size]
+
+    def _make_random_population(self, population_size: int) -> list[Chromosome]:
+        base = self._template_chromosomes()
+        if not base:
+            return []
+        population: list[Chromosome] = []
+        while len(population) < population_size:
+            candidate = self._rng.choice(base).model_copy(deep=True)
+            candidate = mutate_random(
+                candidate,
+                self._space,
+                self._rng,
+                intensity=self._sample_mutation_intensity(candidate),
+            )
+            population.append(candidate)
+        return population
+
+    def _make_greedy_population(
+        self,
+        selected: list[CandidateEvaluation],
+        population_size: int,
+    ) -> list[Chromosome]:
+        if not selected:
+            return initial_population(self._space, population_size, self._rng)
+        best = min(selected, key=lambda item: item.weighted_score)
+        population = [best.chromosome.model_copy(deep=True)]
+        while len(population) < population_size:
+            child = best.chromosome.model_copy(deep=True)
+            if best.feedback is not None and self._rng.random() < self._space.mutation.bottleneck_mutation_rate:
+                child = self._mutate_from_bottleneck(child, best)
+            else:
+                child = mutate_random(child, self._space, self._rng, intensity=self._sample_mutation_intensity(child))
+            population.append(child)
+        return population
+
+    def _template_chromosomes(self) -> list[Chromosome]:
+        host_templates = self._space.host_template_map()
+        return [
+            chromosome_from_template(template, host_templates=host_templates)
+            for template in self._space.templates
+        ]
+
+    def _sample_mutation_intensity(self, chromosome: Chromosome) -> int:
+        editable_units = max(
+            1,
+            sum(max(1, len(rack.slots) + len(rack.hosts)) for rack in chromosome.racks),
+        )
+        return self._rng.randint(1, min(8, editable_units + 2))
 
     def _mutate_from_bottleneck(
         self,
@@ -481,6 +544,7 @@ class HeuristicSearchRunner:
         dump_json(
             self._out_dir / "summary.json",
             {
+                "strategy": self._strategy,
                 "generations": self._generations,
                 "population": self._population_size,
                 "concurrency": self._concurrency,
