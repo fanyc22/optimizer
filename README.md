@@ -1,12 +1,12 @@
-# Two-Stage Hardware-Software Co-Design Optimizer
+# Hardware/Software Topology Search Optimizer
 
-Production-oriented Python framework for iterative optimization of future SuperPOD architectures with:
+Production-oriented Python framework for optimizing future SuperPOD hardware topologies with:
 
-- **Outer loop**: hardware topology and bill-of-material updates.
-- **Inner loop**: software task-to-node mapping and placement strategy.
-- **Simulator coupling**: JSONC-safe file interface for proposal/feedback exchange.
-- **Constraint handling**: thermal, budget, and power-aware feasibility checks.
-- **Search policies**: constraint-aware evolutionary search, TCRO continuous relaxation, and TG-RL masked graph-edit RL.
+- **Topology export**: legal `hardware_topology.v2` generation for mapper/simulator evaluation.
+- **Pipeline coupling**: mapper -> simulator wrapper invocation with parsed telemetry feedback.
+- **Constraint handling**: cost, power, rack, topology, and export-validity repair checks.
+- **Search policies**: evolutionary search, exhaustive finite search, TCRO continuous relaxation, and TG-RL masked graph-edit RL.
+- **Workload support**: single mapper workloads, LLM configs, and TG-RL v2 workload suites.
 
 ## Architecture
 
@@ -14,24 +14,18 @@ Production-oriented Python framework for iterative optimization of future SuperP
 .
 ├── src/codesign_optimizer
 │   ├── cli.py
-│   ├── config/settings.py
 │   ├── io/jsonc.py
 │   ├── models
 │   │   ├── feedback.py
-│   │   ├── hardware.py
-│   │   └── workload.py
+│   │   └── hardware.py
 │   ├── optimizer
 │   │   ├── chromosome.py
-│   │   ├── constraints.py
 │   │   ├── evolutionary.py
 │   │   ├── exporter.py
 │   │   ├── feedback_parser.py
-│   │   ├── inner_loop.py
-│   │   ├── objective.py
-│   │   ├── orchestrator.py
-│   │   ├── outer_loop.py
 │   │   ├── pipeline_client.py
 │   │   ├── repair.py
+│   │   ├── scoring.py
 │   │   ├── search_space.py
 │   │   ├── tcro.py
 │   │   ├── tgrl.py
@@ -41,16 +35,16 @@ Production-oriented Python framework for iterative optimization of future SuperP
 │   │   │   ├── ppo.py
 │   │   │   └── trainer.py
 │   │   └── workload_suite.py
-│   ├── simulator
-│   │   ├── file_adapter.py
-│   │   └── interface.py
 │   └── utils/logging.py
 ├── tests
-│   ├── test_constraints.py
-│   ├── test_jsonc.py
-│   └── test_objective.py
+│   ├── test_heuristic_search.py
+│   ├── test_tcro.py
+│   ├── test_tgrl.py
+│   └── test_tgrl_v2.py
 └── examples
-    └── workload_example.json
+    ├── component_catalog*.json
+    ├── search_space*.json
+    └── workload_suites/
 ```
 
 ## Installation
@@ -78,17 +72,21 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
-Use the provided reference files in this workspace:
+Use the production topology-search path with a component catalog, search-space
+definition, and mapper workload:
 
 ```bash
-codesign-opt run \
-  --hardware ./hw_config_proposal.json \
-  --workload ./examples/workload_example.json \
-  --feedback ./sim_feedback.json \
-  --iterations 5
+codesign-opt search \
+  --catalog ./examples/component_catalog.json \
+  --space ./examples/search_space.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --generations 4 \
+  --population 8 \
+  --out ./artifacts/search_run
 ```
 
-The optimizer writes updated hardware proposals and software mapping outputs under `./artifacts`.
+The optimizer writes candidate artifacts, parsed telemetry, summaries, and the
+best exported `hardware_topology.v2` under the selected output directory.
 
 ## Heuristic Mapper/Simulator Search
 
@@ -399,7 +397,7 @@ python ./scripts/exhaustive_search.py \
 
 - The sample simulator files are **JSONC** (comments included), so parser supports inline `// ...` comments.
 - Hardware and simulator feedback are validated with `pydantic` models.
-- The inner loop and outer loop are decoupled behind stable interfaces for easy replacement with learned policies or advanced solvers.
+- Search policies are decoupled from mapper/simulator evaluation through the shared pipeline client and feedback parser.
 - The heuristic search path keeps topology search at rack/template level instead
   of directly enumerating a large adjacency matrix.
 - TG-RL v2 remains a black-box optimizer over real mapper/simulator evaluations;

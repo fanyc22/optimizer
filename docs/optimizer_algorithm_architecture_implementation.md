@@ -6,35 +6,26 @@
 
 `optimizer` 是一个硬件与软件协同设计优化器。它不直接修改 mapper 或 simulator 的内部语义，而是把候选硬件配置导出为 mapper/simulator 可消费的 `hardware_topology.v2`，再调用既有 mapper 到 simulator 的 wrapper 进行真实评估。优化器把 mapper/simulator 当作黑盒评估器，通过运行结果中的 makespan、链路拥塞、远端内存争用、队列延迟等 telemetry 来指导下一轮硬件候选生成。
 
-当前模块同时保留了两层能力：
+当前模块保留一条生产实现路径：
 
-1. 旧版两阶段协同优化框架：`codesign-opt run`，围绕 `HardwareProposal`、`SoftwareMapper`、`SimulatorClient` 做外层硬件更新和内层软件映射。
-2. 新版拓扑搜索框架：`codesign-opt search`、`codesign-opt tcro`、`codesign-opt tgrl`，围绕 `SearchSpace`、`Chromosome`、`HardwareTopologyExporter`、`MapperSimulatorPipelineClient` 做离散或连续松弛的硬件拓扑搜索。
-
-新版搜索框架是当前主要实现路径。
+`codesign-opt search`、`codesign-opt exhaustive`、`codesign-opt tcro`、`codesign-opt tgrl` 围绕 `SearchSpace`、`Chromosome`、`HardwareTopologyExporter`、`MapperSimulatorPipelineClient` 做离散或连续松弛的硬件拓扑搜索。
 
 ## 2. 代码结构
 
 ```text
 optimizer/src/codesign_optimizer
 ├── cli.py
-├── config/settings.py
 ├── models
 │   ├── feedback.py
-│   ├── hardware.py
-│   └── workload.py
+│   └── hardware.py
 ├── optimizer
 │   ├── chromosome.py
-│   ├── constraints.py
 │   ├── evolutionary.py
 │   ├── exporter.py
 │   ├── feedback_parser.py
-│   ├── inner_loop.py
-│   ├── objective.py
-│   ├── orchestrator.py
-│   ├── outer_loop.py
 │   ├── pipeline_client.py
 │   ├── repair.py
+│   ├── scoring.py
 │   ├── search_space.py
 │   ├── tcro.py
 │   ├── tgrl.py
@@ -44,17 +35,14 @@ optimizer/src/codesign_optimizer
 │   │   ├── ppo.py
 │   │   └── trainer.py
 │   └── workload_suite.py
-└── simulator
-    ├── file_adapter.py
-    └── interface.py
 ```
 
 关键入口如下。
 
 | CLI 命令 | 主要类 | 说明 |
 | --- | --- | --- |
-| `codesign-opt run` | `CoDesignOrchestrator` | 旧版两阶段 loop，读取硬件、workload、sim feedback 文件，做映射和硬件增量更新。 |
 | `codesign-opt search` | `HeuristicSearchRunner` | 约束感知进化搜索，使用 NSGA-II 排序和 telemetry 驱动变异。 |
+| `codesign-opt exhaustive` | `ExhaustiveSearchRunner` | 对小型有限搜索空间枚举全部候选。 |
 | `codesign-opt tcro` | `TCROSearchRunner` | 连续松弛 supernet 搜索，采样离散候选，用 simulator telemetry 更新连续参数。 |
 | `codesign-opt tgrl --mode v0` | `TGRLSearchRunner` | 基于启发式 telemetry prior 的 masked graph-edit 搜索。 |
 | `codesign-opt tgrl --mode v1` | `TGRLSearchRunner` | 在 v0 基础上加入纯 Python 线性策略学习器。 |
@@ -134,7 +122,7 @@ flowchart TD
 `HardwareTopologyExporter.export()` 把 `Chromosome` 转成两份输出：
 
 - `hardware_topology`：mapper/simulator wrapper 使用的 `hardware_topology.v2`。
-- `proposal`：旧版 `HardwareProposal` 风格的结构化对象，便于保存和兼容。
+- `proposal`：`HardwareProposal` 风格的兼容结构化对象，便于保存和对照。
 
 导出逻辑会创建：
 
@@ -160,7 +148,7 @@ flowchart TD
 - top congested link/domain。
 - scaling report。
 
-解析结果统一封装为 `ParsedPipelineFeedback`。为了兼容旧模型，它还会构造 `SimulationFeedback`，把全局 makespan、compute profile、memory profile、network profile 映射到统一 schema。
+解析结果统一封装为 `ParsedPipelineFeedback`。为了复用统一评分逻辑，它还会构造 `SimulationFeedback`，把全局 makespan、compute profile、memory profile、network profile 映射到统一 schema。
 
 ## 5. 共享评估闭环
 
@@ -743,35 +731,7 @@ aggregate feedback 的网络、队列、远端内存等瓶颈指标取各 worklo
 
 v2 suite 模式的最终 summary 会额外输出 `per_workload_single_task_scores`。它对 aggregate-best topology 的每个 workload 单独套用单 workload 评分公式，便于和单 workload 搜索结果对比。这个 score 是报告用途，不改变 suite 优化目标。
 
-## 13. 旧版两阶段协同优化
-
-实现位置：
-
-- `optimizer/orchestrator.py`
-- `optimizer/inner_loop.py`
-- `optimizer/outer_loop.py`
-- `optimizer/objective.py`
-- `optimizer/constraints.py`
-- `simulator/file_adapter.py`
-
-这一路径由 `codesign-opt run` 使用，流程是：
-
-1. `SimulatorClient.run(current_hw, workload)` 得到 `SimulationFeedback`。
-2. `SoftwareMapper.optimize_mapping()` 根据 task 类型、节点能力和 feedback utilization 给 task 分配 node。
-3. `ObjectiveFunction.score()` 计算 makespan、energy、thermal、budget 的加权 score。
-4. `ConstraintEvaluator.evaluate()` 检查 thermal、peak power、budget。
-5. 若约束可行则提前停止。
-6. 否则 `HardwareTopologyOptimizer.propose_next()` 根据 network bottleneck、thermal risk、mapping hotspot 增量修改硬件。
-
-旧版 outer loop 的修改较直接：
-
-- 链路利用率超过 0.9 时增加对应 edge qty。
-- thermal violation 时尝试把一个 `Dense_NPU` 替换成 `Sparse_NPU`。
-- mapping hotspot 明显时 clone 一个热点 node 并接到 switch。
-
-这一路径适合做接口验证和小规模协同优化示例。当前大规模拓扑搜索主要走新版 search/tcro/tgrl 路径。
-
-## 14. Artifact 约定
+## 13. Artifact 约定
 
 新版搜索会尽量保存可复现的中间产物。典型候选目录：
 
@@ -801,9 +761,9 @@ candidate_or_step_dir/
 - `best_hardware_topology.json`：当前 best topology。
 - `best_proposal.json`：当前 best proposal。
 
-## 15. 扩展实现指南
+## 14. 扩展实现指南
 
-### 15.1 增加硬件组件
+### 14.1 增加硬件组件
 
 优先修改 component catalog，而不是修改算法代码。新增节点类型时确保：
 
@@ -818,7 +778,7 @@ candidate_or_step_dir/
 - bandwidth、latency、cost 等字段完整。
 - level/stats domain 能被 exporter 和 feedback parser 正确使用。
 
-### 15.2 增加约束
+### 14.2 增加约束
 
 建议路径：
 
@@ -827,7 +787,7 @@ candidate_or_step_dir/
 3. 在候选 `score.json` 中通过 messages 暴露原因。
 4. 如需影响策略，把约束压力加入 TCRO pseudo-gradient 或 TG-RL heuristic/action features。
 
-### 15.3 增加目标项
+### 14.3 增加目标项
 
 需要同步修改：
 
@@ -840,7 +800,7 @@ candidate_or_step_dir/
 
 如果只是新增 report-only 指标，优先放入 feedback 或 summary，不要扩大核心 objective tuple。
 
-### 15.4 增加 graph edit action
+### 14.4 增加 graph edit action
 
 需要修改：
 
@@ -854,7 +814,7 @@ candidate_or_step_dir/
 
 新增动作仍应经过 repair/export mask，避免策略生成 simulator 不能处理的图。
 
-### 15.5 接入新 telemetry
+### 14.5 接入新 telemetry
 
 推荐流程：
 
@@ -863,7 +823,7 @@ candidate_or_step_dir/
 3. 若用于优化目标，加入 objective 和 score。
 4. 若只用于搜索引导，加入 TCRO pseudo-gradient、TG-RL heuristic prior 或 v2 observation features。
 
-## 16. 关键文件索引
+## 15. 关键文件索引
 
 | 文件 | 作用 |
 | --- | --- |
@@ -884,6 +844,3 @@ candidate_or_step_dir/
 | `optimizer/tgrl_v2/ppo.py` | GAE 与 PPO update。 |
 | `optimizer/tgrl_v2/trainer.py` | v2 rollout、评估、训练、checkpoint、曲线输出。 |
 | `optimizer/workload_suite.py` | 多 workload baseline、并行评估和聚合评分。 |
-| `optimizer/orchestrator.py` | 旧版两阶段 co-design loop。 |
-| `optimizer/inner_loop.py` | 旧版软件映射启发式。 |
-| `optimizer/outer_loop.py` | 旧版硬件增量更新启发式。 |

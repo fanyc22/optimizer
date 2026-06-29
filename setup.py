@@ -4,7 +4,7 @@ from setuptools import find_packages, setup
 setup(
     name="codesign-optimizer",
     version="0.1.0",
-    description="Two-Stage Hardware-Software Co-Design Optimizer for SuperPOD architectures.",
+    description="Hardware/software topology search optimizer for SuperPOD architectures.",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     python_requires=">=3.11",

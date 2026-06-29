@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codesign-optimizer"
 version = "0.1.0"
-description = "Two-Stage Hardware-Software Co-Design Optimizer for SuperPOD architectures."
+description = "Hardware/software topology search optimizer for SuperPOD architectures."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
