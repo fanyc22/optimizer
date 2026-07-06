@@ -1,347 +1,100 @@
-# Hardware/Software Topology Search Optimizer
+# CHASE Optimizer
 
-Production-oriented Python framework for optimizing future SuperPOD hardware topologies with:
+The CHASE optimizer is the outer hardware-search loop for **Cross-Layer
+Heterogeneous Agile System-Exploration**. It proposes physically feasible
+hardware candidates, exports each candidate as `hardware_topology.v2`, evaluates
+the candidate through the CHASE mapper and simulator, then uses parsed telemetry
+to choose the next architecture to explore.
 
-- **Topology export**: legal `hardware_topology.v2` generation for mapper/simulator evaluation.
-- **Pipeline coupling**: mapper -> simulator wrapper invocation with parsed telemetry feedback.
-- **Constraint handling**: cost, power, rack, topology, and export-validity repair checks.
-- **Search policies**: evolutionary search, exhaustive finite search, TCRO continuous relaxation, and TG-RL masked graph-edit RL.
-- **Workload support**: single mapper workloads, LLM configs, and TG-RL v2 workload suites.
+This package is a research artifact for the CHASE paper. It is intended to make
+the paper workflow inspectable and runnable at smoke scale, while still exposing
+the same optimizer entry points used for larger experiments.
 
-## Architecture
+## Overview
+
+CHASE separates architecture exploration into two coupled loops:
 
 ```text
-.
-├── src/codesign_optimizer
-│   ├── cli.py
-│   ├── io/jsonc.py
-│   ├── models
-│   │   ├── feedback.py
-│   │   └── hardware.py
-│   ├── optimizer
-│   │   ├── chromosome.py
-│   │   ├── evolutionary.py
-│   │   ├── exporter.py
-│   │   ├── feedback_parser.py
-│   │   ├── pipeline_client.py
-│   │   ├── repair.py
-│   │   ├── scoring.py
-│   │   ├── search_space.py
-│   │   ├── tcro.py
-│   │   ├── tgrl.py
-│   │   ├── tgrl_v2
-│   │   │   ├── model.py
-│   │   │   ├── observation.py
-│   │   │   ├── ppo.py
-│   │   │   └── trainer.py
-│   │   └── workload_suite.py
-│   └── utils/logging.py
-├── tests
-│   ├── test_heuristic_search.py
-│   ├── test_tcro.py
-│   ├── test_tgrl.py
-│   └── test_tgrl_v2.py
-└── examples
-    ├── component_catalog*.json
-    ├── search_space*.json
-    └── workload_suites/
+component catalog + search space
+        |
+        v
+optimizer candidate proposal
+        |
+        v
+hardware_topology.v2
+        |
+        v
+mapper -> event traces -> simulator
+        |
+        v
+runtime, utilization, congestion, remote-memory telemetry
+        |
+        v
+optimizer update
 ```
 
-## Installation
+The optimizer is responsible for:
+
+- Modeling candidate systems as racks, hosts, slots, switches, memory pools, and
+  typed links.
+- Enforcing cost, power, rack-unit, topology, and export-validity constraints
+  before expensive simulation.
+- Calling `tools/run_mapper_sim_pipeline.py` for fair candidate evaluation.
+- Parsing simulator telemetry into comparable objectives.
+- Exporting the best architecture and per-candidate artifacts for inspection.
+
+The optimizer does not replace the mapper or simulator. Every evaluated
+candidate still goes through the same mapper -> simulator path used by the rest
+of CHASE.
+
+## Quick Start
+
+These commands assume the repository root has already been prepared following
+the top-level `README.md`: submodules are initialized, `mapper/mapper_demo` is
+built, and the simulator binary exists at
+`simulator/build/astra_analytical/build/bin/AstraSim_Analytical_Congestion_Aware`.
+
+Install the optimizer from `optimizer/`:
 
 ```bash
-PYTHON=/path/to/python3.11-or-newer
-$PYTHON -m venv .venv
+cd optimizer
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 pip install -e ".[dev]"
 ```
 
-If the local pip is old and reports that editable mode requires `setup.py` or
-`setup.cfg`, this repository includes a small `setup.py` compatibility shim.
-Make sure the command is run with Python 3.11 or newer; macOS `/usr/bin/python3`
-is often Python 3.9 and is not supported by this package.
+Confirm the CLI:
 
-## Quick Start
+```bash
+codesign-opt --help
+```
 
-Use the production topology-search path with a component catalog, search-space
-definition, and mapper workload:
+Run a small evolutionary search:
 
 ```bash
 codesign-opt search \
   --catalog ./examples/component_catalog.json \
   --space ./examples/search_space.json \
   --workload ../mapper/examples/cg_iteration_workload.json \
-  --generations 4 \
-  --population 8 \
-  --out ./artifacts/search_run
+  --generations 1 \
+  --population 2 \
+  --concurrency 1 \
+  --out /tmp/chase_optimizer_search_smoke
 ```
 
-The optimizer writes candidate artifacts, parsed telemetry, summaries, and the
-best exported `hardware_topology.v2` under the selected output directory.
+Expected outputs include:
 
-## Heuristic Mapper/Simulator Search
-
-The first production search path is a constraint-aware heuristic search. It
-generates discrete rack/fabric candidates, exports each candidate to simulator
-`hardware_topology.v2`, and invokes the existing mapper -> simulator wrapper:
-
-```bash
-codesign-opt search \
-  --catalog ./examples/component_catalog.json \
-  --space ./examples/search_space.json \
-  --workload ../mapper/examples/cg_iteration_workload.json \
-  --generations 4 \
-  --population 8 \
-  --concurrency 4 \
-  --out ./artifacts/search_run
+```text
+/tmp/chase_optimizer_search_smoke/
+  iter_*/candidate_*/
+  summary.json
+  pareto_frontier.json
+  best_proposal.json
+  best_hardware_topology.json
 ```
 
-`--concurrency` caps how many candidates in the same generation are evaluated
-at once. Each concurrent evaluation gets its own `iter_*/candidate_*/wrapper`
-directory and launches an independent mapper/simulator wrapper process.
-
-The search writes per-candidate artifacts under `iter_*/candidate_*`:
-
-- `proposal.json`
-- `hardware_topology.json`
-- `wrapper/` with mapper/simulator outputs
-- `score.json`
-
-It also writes `summary.json`, `pareto_frontier.json`,
-`best_hardware_topology.json`, and `best_proposal.json`.
-
-The search does not modify mapper, ET, or simulator semantics. The wrapper
-still projects only rank compute nodes to mapper; switch/router/memory-only
-nodes remain simulator-only explicit graph nodes.
-
-To run every candidate with the continuous calibration fit model, set
-`evaluation.calibration_fit_model` in the search-space JSON. Relative paths are
-resolved from `evaluation.repo_root` when present, otherwise from the repository
-root detected by the optimizer:
-
-```json
-{
-  "evaluation": {
-    "mapper": "heft",
-    "parallel": "auto",
-    "topology_format": "hardware",
-    "calibration_fit_model": "calibration/calibration_fit_model.json"
-  }
-}
-```
-
-The optimizer passes this to `tools/run_mapper_sim_pipeline.py
---calibration-fit-model`. The wrapper materializes the model before launching
-simulator: `hardware_topology.json` keeps the compact per-hardware-link
-calibration tables used by simulator, while `mapper_hardware.json` defaults to
-`mapper_calibration_mode: "baked"` and folds the selected communication group
-into each projected mapper link's `bw_gbps` and `latency_ms`. The old expanded
-mapper calibration tables can still be requested with
-`mapper_calibration_mode: "full"` for comparison. The simulator command does not
-include `--calibration-fit-model`. This requires the normal
-`hardware_topology.v2` + congestion-aware analytical simulator path.
-
-The wrapper also avoids saving large debug artifacts by default. It does not
-save per-operator simulator JSONL stats unless `evaluation.save_operator_stats`
-is `true`, and it writes generated `mapper_hardware.json` /
-`hardware_topology.json` to a runtime temp directory unless
-`evaluation.save_wrapper_inputs` is `true`. Enable these only when debugging a
-specific case; long workloads can otherwise make wrapper artifacts dominate disk
-usage.
-
-To optimize for LLM inference, keep using `--workload` as the path argument but
-point it at a supported LLM `config.json` or model directory, and set
-`evaluation.workload_kind` to `"llm"` in the search-space JSON:
-
-```json
-{
-  "evaluation": {
-    "workload_kind": "llm",
-    "mapper": "heft",
-    "parallel": "auto",
-    "llm_prompt_len": 128,
-    "llm_decode_steps": 16,
-    "llm_tp": 2,
-    "llm_pp": 1
-  }
-}
-```
-
-Then run the optimizer with the LLM config path:
-
-```bash
-codesign-opt search \
-  --catalog ./examples/component_catalog.json \
-  --space ./examples/search_space.json \
-  --workload ../mapper/examples/qwenconfig.json \
-  --generations 2 \
-  --population 4 \
-  --out ./artifacts/search_llm
-```
-
-The same `evaluation.workload_kind="llm"` setting is honored by `search`,
-`exhaustive`, `tcro`, and `tgrl`. In TG-RL v2 workload-suite mode, each suite
-item path is interpreted as an LLM config when this setting is enabled.
-
-## TCRO Continuous-Relaxed Search
-
-TCRO keeps a continuous supernet inside the optimizer, samples discrete
-`hardware_topology.v2` candidates for evaluation, then uses simulator telemetry
-as pseudo-gradients to update node-type logits and link alpha values:
-
-```bash
-codesign-opt tcro \
-  --catalog ./examples/component_catalog_tgrl.json \
-  --space ./examples/search_space_tgrl.json \
-  --workload ../mapper/examples/cg_iteration_workload.json \
-  --steps 8 \
-  --samples-per-step 4 \
-  --concurrency 2 \
-  --rack-activation-threshold 0.5 \
-  --out ./artifacts/tcro_run
-```
-
-TCRO writes `step_*/sample_*` artifacts plus `supernet_state.json`,
-`telemetry_history.json`, `tcro_summary.json`, `best_proposal.json`, and
-`best_hardware_topology.json`. The simulator still only sees legal discrete
-hardware graphs; the continuous relaxation is optimizer-internal. TCRO v1
-initializes from the first template in the search space, so use a single
-starting template when running focused continuous relaxation experiments.
-
-TCRO search spaces may include latent rack templates by setting a rack to
-`"optional": true`, `"active": false`, and a small `activation_alpha`. Inactive
-optional racks are kept in the continuous supernet but are omitted from exported
-`hardware_topology.v2` until their `active_alpha` crosses the activation
-threshold. This lets TCRO grow extra compute, memory, or hybrid racks without
-changing the mapper/simulator interface.
-
-## TG-RL Masked Graph-Edit Search
-
-TG-RL keeps the candidate hardware discrete. Each step enumerates legal
-slot/node, rack-topology, inter-rack, and rack add/remove graph edits, masks out
-edits that fail existing repair/export constraints, scores the remaining edits
-with simulator telemetry priors, and evaluates one or more sampled candidates:
-
-```bash
-codesign-opt tgrl \
-  --catalog ./examples/component_catalog_tgrl.json \
-  --space ./examples/search_space_tgrl.json \
-  --workload ../mapper/examples/cg_iteration_workload.json \
-  --episodes 20 \
-  --steps-per-episode 8 \
-  --mode v0 \
-  --concurrency 2 \
-  --out ./artifacts/tgrl_run
-```
-
-`--mode v0` uses the telemetry heuristic prior directly. `--mode v1` adds a
-small pure-Python linear policy over graph-edit features and updates it from
-trajectory rewards with a KL-style pull toward the heuristic prior. TG-RL writes
-`episode_*/step_*` artifacts plus `trajectory.jsonl`, `policy_state.json`,
-`tgrl_summary.json`, `best_proposal.json`, and `best_hardware_topology.json`.
-
-`--mode v2` enables the optional GNN-PPO trainer. Install the RL extra first:
-
-```bash
-pip install -e ".[dev,rl]"
-codesign-opt tgrl \
-  --catalog ./examples/component_catalog_tgrl.json \
-  --space ./examples/search_space_tgrl.json \
-  --workload ../mapper/examples/cg_iteration_workload.json \
-  --episodes 4 \
-  --steps-per-episode 4 \
-  --mode v2 \
-  --concurrency 2 \
-  --ppo-epochs 2 \
-  --device auto \
-  --out ./artifacts/tgrl_v2_run
-```
-
-In v2, `episodes` are PPO updates, `steps-per-episode` is rollout length, and
-`concurrency` is the number of parallel rollout environments. The trainer writes
-`update_*/env_*/step_*` artifacts, `ppo_metrics.json`, and
-`checkpoints/policy_latest.pt`.
-
-The v2 policy is deliberately constrained. It does not generate arbitrary
-graphs. For each rollout state, TG-RL first enumerates graph edits and masks out
-anything that fails repair/export checks. The GNN policy then chooses among the
-remaining legal actions:
-
-- The observation graph contains a global node, rack nodes, slot nodes,
-  rack-slot edges, inter-rack edges, budget/power margins, current and best
-  score, rollout progress, simulator telemetry pressure, and optional workload
-  suite speedup features.
-- The actor scores each masked action from the graph embedding, the action
-  target embedding, the action feature vector, and the telemetry heuristic
-  logit.
-- The action distribution is `actor_logits + heuristic_weight *
-  heuristic_logits`, so PPO learns a correction over the telemetry prior rather
-  than exploring from scratch.
-- The reward is the normalized weighted-score improvement. Infeasible
-  candidates and duplicate candidates are penalized; new global-best candidates
-  receive a small bonus; rewards are clipped before PPO.
-- PPO uses GAE, clipped policy loss, value loss, entropy regularization, and a
-  KL penalty toward the telemetry prior.
-
-v2 also supports multi-workload optimization:
-
-```bash
-codesign-opt tgrl \
-  --catalog ./examples/component_catalog_tgrl.json \
-  --space ./examples/search_space_tgrl.json \
-  --workload-suite ./examples/workload_suites/sparse_suite_example.json \
-  --episodes 4 \
-  --steps-per-episode 4 \
-  --mode v2 \
-  --concurrency 2 \
-  --ppo-epochs 2 \
-  --device auto \
-  --out ./artifacts/tgrl_v2_suite_run
-```
-
-For workload suites, the trainer evaluates or loads `baseline_suite.json`, then
-optimizes the weighted geometric mean speedup by using
-`suite_makespan_score = 1 / geomean_speedup` as the primary performance term.
-It writes per-workload feedback and curve files under `curves/`, including JSON,
-CSV, and SVG summaries. The final CLI output and `tgrl_summary.json` report a
-per-workload `single_task_score` for the aggregate-best topology. That score is
-recomputed with the same weighted-score formula used by single-workload TG-RL,
-so it is comparable to a single-workload run's `Best score` for the same
-workload. It is report-only and does not change the multi-workload optimization
-objective.
-
-Resume training with:
-
-```bash
-codesign-opt tgrl \
-  --catalog ./examples/component_catalog_tgrl.json \
-  --space ./examples/search_space_tgrl.json \
-  --workload ../mapper/examples/cg_iteration_workload.json \
-  --mode v2 \
-  --resume ./artifacts/tgrl_v2_run/checkpoints/policy_latest.pt \
-  --episodes 2 \
-  --steps-per-episode 4 \
-  --out ./artifacts/tgrl_v2_run
-```
-
-The checkpoint stores compatible model weights, optimizer state, RNG state,
-seen candidate signatures, workload-suite baseline, global best score, and the
-best chromosome from the previous update as the next rollout seed.
-
-For apples-to-apples comparison with a fixed-topology exhaustive run, add
-`--freeze-topology` to a TG-RL command. This masks graph edits that change rack
-count, slot occupancy, or fabric topology, leaving only node-type substitutions
-on already occupied slots. When the search space defines
-`exhaustive.slot_options`, frozen-topology TG-RL also restricts replacement
-targets to those node types and applies any link type/quantity specified by the
-selected slot option.
-
-## Exhaustive Finite Search
-
-For very small spaces, use the exhaustive runner to evaluate every candidate
-once and report the global optimum under the same weighted-score formula used by
-TG-RL v2 single-workload runs:
+Run a tiny exhaustive search:
 
 ```bash
 codesign-opt exhaustive \
@@ -350,33 +103,228 @@ codesign-opt exhaustive \
   --workload ../mapper/examples/cg_iteration_workload.json \
   --concurrency 1 \
   --no-allow-empty-slots \
-  --out ./artifacts/exhaustive_tiny_run
+  --out /tmp/chase_optimizer_exhaustive_smoke
 ```
 
-The tiny example fixes one rack with two compute slots. Its
-`exhaustive.slot_options` contains two node choices, so the full space is
-`2^2 = 4` candidates. The runner validates that the space is finite, checks
-`exhaustive.max_candidates`, writes `candidate_*/score.json`, and exports
-`best_proposal.json`, `best_hardware_topology.json`, and
-`exhaustive_summary.json`.
+This enumerates four finite candidates and writes `exhaustive_summary.json`,
+`candidate_scores.jsonl`, and the best exported topology.
 
-The same entrypoint is also available as a standalone script:
+## Public Examples
+
+| File | Purpose |
+| --- | --- |
+| `examples/component_catalog.json` | Small smoke catalog for fast search tests. |
+| `examples/search_space.json` | Small evolutionary-search space used by quick start. |
+| `examples/component_catalog_tgrl.json` | Larger typed catalog for TCRO and TG-RL examples. |
+| `examples/search_space_tgrl.json` | Rack/slot search space with latent racks for TCRO and TG-RL. |
+| `examples/search_space_tgrl_exhaustive_tiny.json` | Finite four-candidate exhaustive smoke fixture. |
+| `examples/component_catalog_host_templates.json` | Host-template catalog for host-granularity TG-RL tests. |
+| `examples/search_space_host_template.json` | Host-template search-space example. |
+| `examples/component_catalog_enterprise.json` | Enterprise H100/H200/L40S/L4-style component catalog. |
+| `examples/search_space_enterprise.json` | Larger host-template enterprise topology example. |
+| `examples/workload_suites/sparse_suite_example.json` | Small runnable workload-suite smoke fixture. |
+
+Some larger workload-suite JSON files intentionally refer to experiment inputs
+that are not part of the lightweight smoke path. Use `sparse_suite_example.json`
+when you want a suite that is self-contained in this repository.
+
+## Optimizer Modes
+
+### `search`
+
+`codesign-opt search` is the simplest practical mode. It performs a constrained
+evolutionary search over candidate topology templates, evaluates each candidate
+through the mapper/simulator wrapper, and ranks candidates by weighted runtime,
+cost, power, network, and remote-memory objectives.
+
+Use this first when validating a new installation or a new component catalog.
 
 ```bash
-python ./scripts/exhaustive_search.py \
+codesign-opt search \
+  --catalog ./examples/component_catalog.json \
+  --space ./examples/search_space.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --generations 1 \
+  --population 2 \
+  --concurrency 1 \
+  --out /tmp/chase_search_smoke
+```
+
+### `exhaustive`
+
+`codesign-opt exhaustive` enumerates a finite search space and is useful for
+near-optimality checks on deliberately tiny spaces. The search space must define
+finite `exhaustive.slot_options`; host-granularity spaces are not exhaustive
+search inputs.
+
+```bash
+codesign-opt exhaustive \
   --catalog ./examples/component_catalog_tgrl.json \
   --space ./examples/search_space_tgrl_exhaustive_tiny.json \
   --workload ../mapper/examples/cg_iteration_workload.json \
-  --no-allow-empty-slots
+  --no-allow-empty-slots \
+  --out /tmp/chase_exhaustive_smoke
 ```
 
-## Key Design Notes
+The same mode is available through `scripts/exhaustive_search.py` for users who
+prefer a standalone script.
 
-- The sample simulator files are **JSONC** (comments included), so parser supports inline `// ...` comments.
-- Hardware and simulator feedback are validated with `pydantic` models.
-- Search policies are decoupled from mapper/simulator evaluation through the shared pipeline client and feedback parser.
-- The heuristic search path keeps topology search at rack/template level instead
-  of directly enumerating a large adjacency matrix.
-- TG-RL v2 remains a black-box optimizer over real mapper/simulator evaluations;
-  simulator telemetry guides sampling, but the simulator itself is not treated as
-  differentiable.
+### `tcro`
+
+`codesign-opt tcro` keeps a continuous relaxation inside the optimizer and
+samples legal discrete topologies for mapper/simulator evaluation. The simulator
+only receives exported discrete hardware graphs; the continuous supernet is an
+optimizer-internal state.
+
+```bash
+codesign-opt tcro \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --steps 2 \
+  --samples-per-step 1 \
+  --concurrency 1 \
+  --out /tmp/chase_tcro_smoke
+```
+
+Outputs include `supernet_state.json`, `telemetry_history.json`,
+`tcro_summary.json`, and best-topology artifacts.
+
+### `tgrl`
+
+`codesign-opt tgrl` implements telemetry-guided graph-edit search. It enumerates
+legal graph edits, masks infeasible actions, combines simulator telemetry with a
+policy score, evaluates sampled candidates, and records the resulting
+trajectory.
+
+Available modes:
+
+- `--mode v0`: telemetry heuristic prior only.
+- `--mode v1`: lightweight learned linear policy.
+- `--mode v2`: GNN-PPO policy over masked graph edits.
+
+Smoke run without PyTorch:
+
+```bash
+codesign-opt tgrl \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --episodes 1 \
+  --steps-per-episode 1 \
+  --mode v0 \
+  --concurrency 1 \
+  --out /tmp/chase_tgrl_v0_smoke
+```
+
+TG-RL v2 requires the optional RL dependency:
+
+```bash
+pip install -e ".[dev,rl]"
+
+codesign-opt tgrl \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --episodes 1 \
+  --steps-per-episode 1 \
+  --mode v2 \
+  --concurrency 1 \
+  --ppo-epochs 1 \
+  --device auto \
+  --out /tmp/chase_tgrl_v2_smoke
+```
+
+TG-RL v2 also supports workload suites:
+
+```bash
+codesign-opt tgrl \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl.json \
+  --workload-suite ./examples/workload_suites/sparse_suite_example.json \
+  --episodes 1 \
+  --steps-per-episode 1 \
+  --mode v2 \
+  --concurrency 1 \
+  --ppo-epochs 1 \
+  --device auto \
+  --out /tmp/chase_tgrl_v2_suite_smoke
+```
+
+## Inputs
+
+### Component Catalog
+
+A component catalog defines available node and link types:
+
+- `node_types`: GPUs, CPUs, switches, memory pools, host switches, and their
+  cost, power, rack-unit, compute, memory, and radix properties.
+- `link_types`: bandwidth, latency, protocol, hierarchy level, and per-link
+  cost.
+
+### Search Space
+
+A search space defines how components may be assembled:
+
+- `templates`: seed topology candidates.
+- `host_templates`: optional host-level building blocks for host-granularity
+  search.
+- `rack_archetypes`: templates for dynamically added racks.
+- `mutation`: graph-edit and link-quantity bounds.
+- `limits`: global and per-rack cost, power, rack-unit, and rack-count limits.
+- `evaluation`: mapper/simulator wrapper options.
+- `exhaustive`: finite choices for exhaustive search, when applicable.
+
+### Workload
+
+Use `--workload` for a mapper workload DAG JSON. To optimize an LLM config, set
+`evaluation.workload_kind` to `"llm"` in the search-space JSON and pass a config
+such as `../mapper/examples/qwenconfig.json` through `--workload`.
+
+For multi-workload TG-RL v2, use `--workload-suite` with a suite JSON.
+
+## Outputs
+
+Most modes create an output directory containing:
+
+- Candidate directories with `proposal.json`, `hardware_topology.json`,
+  `score.json`, and wrapper outputs.
+- Mode summaries such as `summary.json`, `exhaustive_summary.json`,
+  `tcro_summary.json`, or `tgrl_summary.json`.
+- `best_proposal.json` and `best_hardware_topology.json`.
+- Optional SVG topology visualizations.
+
+The wrapper removes large intermediate mapper/simulator traces by default for
+optimizer runs. Set `evaluation.save_wrapper_inputs` or
+`evaluation.save_operator_stats` only when debugging a specific case.
+
+## Relationship To The Paper
+
+In the CHASE paper, the optimizer is the telemetry-guided outer loop in Stage
+III. It consumes the mapper/simulator feedback described by the framework and
+searches for physically feasible XHS candidates under deployment constraints.
+
+The quick-start examples here are intentionally small. Full paper-scale
+experiments require larger workload suites, longer search budgets, and
+calibration/evaluation inputs that are outside the fast smoke path.
+
+## Tests
+
+From `optimizer/`:
+
+```bash
+source .venv/bin/activate
+python -m pytest tests -q
+```
+
+The optimizer tests exercise schema loading, repair and export logic,
+evolutionary search, exhaustive search, TCRO, TG-RL, host templates, workload
+suites, and telemetry parsing.
+
+## More Documentation
+
+- Root optimizer manual: `../docs/optimizer.md`
+- End-to-end wrapper details: `../docs/pipeline.md`
+- Algorithm and implementation notes:
+  `docs/optimizer_algorithm_architecture_implementation.md`
+
