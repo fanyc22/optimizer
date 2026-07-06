@@ -1,0 +1,84 @@
+{
+  "seed": 2601,
+  "templates": [
+    {
+      "name": "tgrl_exhaustive_tiny",
+      "racks": [
+        {
+          "rack_id": "rack0",
+          "role": "compute",
+          "max_slots": 2,
+          "slots": [
+            {
+              "slot_id": "slot0",
+              "node_type": "GPU_BALANCED_80TF_80GB",
+              "link_type": "GPU_FABRIC_200G",
+              "link_qty": 1
+            },
+            {
+              "slot_id": "slot1",
+              "node_type": "CPU_HIGH_BW_96C",
+              "link_type": "CPU_PCIE_128G",
+              "link_qty": 1
+            }
+          ],
+          "memory_pool_count": 0,
+          "switch_count": 1,
+          "switch_type": "HYBRID_RACK_SWITCH_64",
+          "intra_rack_topology": "switch",
+          "intra_rack_link_type": "GPU_FABRIC_200G",
+          "intra_rack_link_qty": 1,
+          "limits": {
+            "max_memory_pool_count": 0,
+            "max_switch_count": 1,
+            "max_rack_units": 16,
+            "max_power_watts": 9000,
+            "max_slots": 2
+          }
+        }
+      ],
+      "inter_rack": "ring",
+      "inter_rack_link_type": "OPTICAL_400G",
+      "inter_rack_link_qty": 1
+    }
+  ],
+  "exhaustive": {
+    "slot_options": [
+      {
+        "node_type": "GPU_BALANCED_80TF_80GB",
+        "link_type": "GPU_FABRIC_200G",
+        "link_qty": 1
+      },
+      {
+        "node_type": "CPU_HIGH_BW_96C",
+        "link_type": "CPU_PCIE_128G",
+        "link_qty": 1
+      }
+    ],
+    "intra_rack_topologies": ["switch"],
+    "intra_rack_link_types": ["GPU_FABRIC_200G"],
+    "intra_rack_link_qty": [1],
+    "inter_rack_topologies": ["ring"],
+    "inter_rack_link_types": ["OPTICAL_400G"],
+    "inter_rack_link_qty": [1],
+    "max_candidates": 4
+  },
+  "limits": {
+    "max_total_cost": 1250000,
+    "max_peak_power_watts": 34000,
+    "max_rack_power_watts": 22000,
+    "max_rack_units": 42,
+    "max_total_racks": 1,
+    "min_compute_racks": 1,
+    "max_compute_racks": 1,
+    "max_memory_racks": 0,
+    "max_hybrid_racks": 0
+  },
+  "evaluation": {
+    "workload_kind": "mapper",
+    "mapper": "heft",
+    "parallel": "none",
+    "topology_format": "hardware",
+    "cleanup_wrapper_intermediate": true
+  }
+}

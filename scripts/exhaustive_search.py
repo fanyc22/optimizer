@@ -34,6 +34,11 @@ def main(
         False,
         help="Keep rack fabric and inter-rack topology fields fixed to the template values.",
     ),
+    allow_empty_slots: bool = typer.Option(
+        True,
+        "--allow-empty-slots/--no-allow-empty-slots",
+        help="Let exhaustive enumeration remove devices by treating each slot as optionally empty.",
+    ),
     out: Path = typer.Option(Path("artifacts/exhaustive_run"), help="Search output directory."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logs."),
 ) -> None:
@@ -51,6 +56,7 @@ def main(
         concurrency=concurrency,
         max_candidates=max_candidates,
         freeze_topology=freeze_topology,
+        allow_empty_slots=allow_empty_slots,
     )
     result = runner.run()
     console.print(
@@ -58,6 +64,7 @@ def main(
         f"Total candidates: {result.total_candidates}\n"
         f"Unique candidates: {result.unique_candidates}\n"
         f"Evaluations: {len(result.history)}\n"
+        f"Allow empty slots: {allow_empty_slots}\n"
         f"Feasible evaluations: {sum(1 for item in result.history if item.feasible)}\n"
         f"Best score: {result.best.weighted_score:.4f}\n"
         f"Best feasible: {result.best.feasible}\n"

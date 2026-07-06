@@ -1,5 +1,5 @@
 {
-  "name": "small_mixed_suite",
+  "name": "sparse_suite_example",
   "metric": "makespan",
   "workload_concurrency": 1,
   "workloads": [

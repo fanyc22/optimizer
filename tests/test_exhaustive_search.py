@@ -195,69 +195,53 @@ def _variable_occupancy_space() -> SearchSpace:
     )
 
 
-def test_exhaustive_enumeration_counts_example_space() -> None:
+def test_exhaustive_enumeration_counts_tgrl_tiny_example_space() -> None:
     optimizer_root = Path(__file__).resolve().parents[1]
-    catalog = load_component_library(load_jsonc(optimizer_root / "examples" / "component_catalog_tcro_latent_rack.json"))
-    examples = [
-        ("search_space_3rack_exhaustive_tiny.json", 3, 2, 64),
-        ("search_space_4rack_exhaustive_tiny.json", 4, 2, 256),
-        ("search_space_5rack_exhaustive_tiny.json", 5, 2, 1024),
-        ("search_space_1rack_4device_exhaustive_topology.json", 1, 4, 48),
-        ("search_space_2rack_4device_exhaustive_topology.json", 2, 4, 4608),
-    ]
-    for filename, rack_count, slots_per_rack, candidate_count in examples:
-        space = SearchSpace.model_validate(load_jsonc(optimizer_root / "examples" / filename))
+    catalog = load_component_library(load_jsonc(optimizer_root / "examples" / "component_catalog_tgrl.json"))
+    space = SearchSpace.model_validate(load_jsonc(optimizer_root / "examples" / "search_space_tgrl_exhaustive_tiny.json"))
 
-        validate_exhaustive_space(space, component_library=catalog, allow_empty_slots=False)
+    validate_exhaustive_space(space, component_library=catalog, allow_empty_slots=False)
 
-        assert len(space.templates[0].racks) == rack_count
-        assert all(rack.max_slots == slots_per_rack for rack in space.templates[0].racks)
-        assert count_exhaustive_candidates(space, allow_empty_slots=False) == candidate_count
-        chromosomes = (
-            iter_exhaustive_chromosomes(space, allow_empty_slots=False)
-            if candidate_count <= 1024
-            else iter_exhaustive_chromosomes(space, freeze_topology=True, allow_empty_slots=False)
-        )
-        assert len(chromosomes) == (candidate_count if candidate_count <= 1024 else 256)
-        assert all(chromosome.inter_rack != "none" for chromosome in chromosomes)
-        assert all(
-            rack.intra_rack_topology != "none"
-            for chromosome in chromosomes
-            for rack in chromosome.racks
-        )
-        assert all(
-            slot.link_type == ("GPU_FABRIC_200G" if slot.node_type == "GPU_BALANCED_80TF_80GB" else "CPU_PCIE_128G")
-            for chromosome in chromosomes
-            for rack in chromosome.racks
-            for slot in rack.slots
-        )
+    assert space.templates[0].name == "tgrl_exhaustive_tiny"
+    assert len(space.templates[0].racks) == 1
+    assert all(rack.max_slots == 2 for rack in space.templates[0].racks)
+    assert count_exhaustive_candidates(space, allow_empty_slots=False) == 4
+    chromosomes = iter_exhaustive_chromosomes(space, allow_empty_slots=False)
+    assert len(chromosomes) == 4
+    assert all(chromosome.inter_rack == "ring" for chromosome in chromosomes)
+    assert all(
+        rack.intra_rack_topology == "switch"
+        for chromosome in chromosomes
+        for rack in chromosome.racks
+    )
+    assert {
+        tuple(slot.node_type for rack in chromosome.racks for slot in rack.slots)
+        for chromosome in chromosomes
+    } == {
+        ("GPU_BALANCED_80TF_80GB", "GPU_BALANCED_80TF_80GB"),
+        ("GPU_BALANCED_80TF_80GB", "CPU_HIGH_BW_96C"),
+        ("CPU_HIGH_BW_96C", "GPU_BALANCED_80TF_80GB"),
+        ("CPU_HIGH_BW_96C", "CPU_HIGH_BW_96C"),
+    }
 
 
-def test_exhaustive_freeze_topology_reduces_topology_examples() -> None:
+def test_exhaustive_freeze_topology_keeps_tgrl_tiny_example_count() -> None:
     optimizer_root = Path(__file__).resolve().parents[1]
-    examples = [
-        ("search_space_1rack_4device_exhaustive_topology.json", 48, 16),
-        ("search_space_2rack_4device_exhaustive_topology.json", 4608, 256),
-    ]
-    for filename, unfrozen_count, frozen_count in examples:
-        space = SearchSpace.model_validate(load_jsonc(optimizer_root / "examples" / filename))
+    space = SearchSpace.model_validate(load_jsonc(optimizer_root / "examples" / "search_space_tgrl_exhaustive_tiny.json"))
 
-        assert count_exhaustive_candidates(space, allow_empty_slots=False) == unfrozen_count
-        assert (
-            count_exhaustive_candidates(space, freeze_topology=True, allow_empty_slots=False)
-            == frozen_count
-        )
-        frozen_chromosomes = iter_exhaustive_chromosomes(
-            space,
-            freeze_topology=True,
-            allow_empty_slots=False,
-        )
-        assert len(frozen_chromosomes) == frozen_count
-        assert all(
-            rack.intra_rack_topology == "switch"
-            for chromosome in frozen_chromosomes
-            for rack in chromosome.racks
-        )
+    assert count_exhaustive_candidates(space, allow_empty_slots=False) == 4
+    assert count_exhaustive_candidates(space, freeze_topology=True, allow_empty_slots=False) == 4
+    frozen_chromosomes = iter_exhaustive_chromosomes(
+        space,
+        freeze_topology=True,
+        allow_empty_slots=False,
+    )
+    assert len(frozen_chromosomes) == 4
+    assert all(
+        rack.intra_rack_topology == "switch"
+        for chromosome in frozen_chromosomes
+        for rack in chromosome.racks
+    )
 
 
 def test_exhaustive_runner_finds_best_candidate(tmp_path: Path) -> None:

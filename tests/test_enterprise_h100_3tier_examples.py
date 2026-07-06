@@ -18,10 +18,10 @@ def _load_json(path: Path) -> dict:
 
 def test_enterprise_h100_3tier_example_is_feasible_and_cost_calibrated() -> None:
     library = ComponentLibrary.model_validate(
-        _load_json(ROOT / "examples" / "component_catalog_enterprise_h100_3tier.json")
+        _load_json(ROOT / "examples" / "component_catalog_enterprise.json")
     )
     space = SearchSpace.model_validate(
-        _load_json(ROOT / "examples" / "search_space_enterprise_h100_3tier_tgrl.json")
+        _load_json(ROOT / "examples" / "search_space_enterprise.json")
     )
     chromosome = chromosome_from_template(space.templates[0], host_templates=space.host_template_map())
 
@@ -48,10 +48,10 @@ def test_enterprise_h100_3tier_example_is_feasible_and_cost_calibrated() -> None
 
 def test_enterprise_h100_3tier_host_options_have_perf_cost_gradient() -> None:
     library = ComponentLibrary.model_validate(
-        _load_json(ROOT / "examples" / "component_catalog_enterprise_h100_3tier.json")
+        _load_json(ROOT / "examples" / "component_catalog_enterprise.json")
     )
     space = SearchSpace.model_validate(
-        _load_json(ROOT / "examples" / "search_space_enterprise_h100_3tier_tgrl.json")
+        _load_json(ROOT / "examples" / "search_space_enterprise.json")
     )
     chromosome = chromosome_from_template(space.templates[0], host_templates=space.host_template_map())
 
@@ -99,10 +99,10 @@ def test_enterprise_h100_3tier_host_options_have_perf_cost_gradient() -> None:
 
 def test_enterprise_h100_3tier_has_multiple_4gpu_host_choices() -> None:
     library = ComponentLibrary.model_validate(
-        _load_json(ROOT / "examples" / "component_catalog_enterprise_h100_3tier.json")
+        _load_json(ROOT / "examples" / "component_catalog_enterprise.json")
     )
     space = SearchSpace.model_validate(
-        _load_json(ROOT / "examples" / "search_space_enterprise_h100_3tier_tgrl.json")
+        _load_json(ROOT / "examples" / "search_space_enterprise.json")
     )
     chromosome = chromosome_from_template(space.templates[0], host_templates=space.host_template_map())
 
@@ -150,12 +150,12 @@ def test_enterprise_h100_3tier_has_multiple_4gpu_host_choices() -> None:
     assert replacement_costs["l40s_4gpu_inference_2u_host"] > replacement_costs["l4_4gpu_edge_inference_1u_host"]
 
 
-def test_enterprise_4gpu_small_2rack_search_space_keeps_exploration_headroom() -> None:
+def test_enterprise_h100_2rack_search_space_keeps_exploration_headroom() -> None:
     library = ComponentLibrary.model_validate(
-        _load_json(ROOT / "examples" / "component_catalog_enterprise_h100_3tier.json")
+        _load_json(ROOT / "examples" / "component_catalog_enterprise.json")
     )
     space = SearchSpace.model_validate(
-        _load_json(ROOT / "examples" / "search_space_enterprise_4gpu_small_2rack_tgrl.json")
+        _load_json(ROOT / "examples" / "search_space_enterprise.json")
     )
     chromosome = chromosome_from_template(space.templates[0], host_templates=space.host_template_map())
 
@@ -164,14 +164,14 @@ def test_enterprise_4gpu_small_2rack_search_space_keeps_exploration_headroom() -
 
     assert repair.feasible, repair.messages
     assert len(chromosome.racks) == 2
-    assert all(len(rack.occupied_hosts) == 2 for rack in chromosome.racks)
-    assert exported.rank_count == 24
-    assert 1_300_000 <= exported.proposal.total_estimated_cost() <= 1_600_000
-    assert exported.proposal.total_estimated_cost() < space.limits.max_total_cost * 0.4
+    assert all(len(rack.occupied_hosts) == 4 for rack in chromosome.racks)
+    assert exported.rank_count == 80
+    assert 9_500_000 <= exported.proposal.total_estimated_cost() <= 10_500_000
+    assert exported.proposal.total_estimated_cost() < space.limits.max_total_cost
 
     groups = {group["id"]: group for group in exported.hardware_topology["hierarchy"]["groups"]}
-    assert groups["rack0"]["attrs"]["rack_units"] == 9
-    assert groups["rack1"]["attrs"]["rack_units"] == 9
+    assert groups["rack0"]["attrs"]["rack_units"] == 25
+    assert groups["rack1"]["attrs"]["rack_units"] == 25
 
     actions = enumerate_graph_edit_actions(chromosome, component_library=library, search_space=space)
     assert any(action.action_type == "add_rack_from_template" for action in actions)
@@ -188,14 +188,14 @@ def test_enterprise_4gpu_small_2rack_search_space_keeps_exploration_headroom() -
     )
     assert any(
         action.action_type == "add_host_to_bay"
-        and action.resource == "host2"
+        and action.resource == "host4"
         and action.target == "l40s_4gpu_inference_2u_host"
         for action in actions
     )
     assert any(
         action.action_type == "replace_host_template"
         and action.resource == "host0"
-        and action.target == "xe9680_hgx_h100_8gpu_host"
+        and action.target == "xe9680_hgx_h200_8gpu_host"
         for action in actions
     )
 

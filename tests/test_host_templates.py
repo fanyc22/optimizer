@@ -27,7 +27,7 @@ def _library() -> ComponentLibrary:
 
 
 def _space() -> SearchSpace:
-    return SearchSpace.model_validate(_load_json(ROOT / "examples" / "search_space_host_template_tgrl.json"))
+    return SearchSpace.model_validate(_load_json(ROOT / "examples" / "search_space_host_template.json"))
 
 
 def test_host_template_search_space_parses_and_legacy_slots_still_parse() -> None:
@@ -66,7 +66,7 @@ def test_host_template_search_space_parses_and_legacy_slots_still_parse() -> Non
     assert legacy.templates[0].racks[0].slots[0].slot_id == "gpu0"
     assert legacy.mutation.search_granularity == "slot"
 
-    oversized = _load_json(ROOT / "examples" / "search_space_host_template_tgrl.json")
+    oversized = _load_json(ROOT / "examples" / "search_space_host_template.json")
     oversized.pop("limits")
     oversized["templates"][0]["racks"][0]["limits"].pop("max_rack_units")
     oversized["host_templates"][0]["rack_units"] = 41
@@ -162,7 +162,7 @@ def test_tgrl_host_mode_only_enumerates_and_applies_host_actions() -> None:
 
 def test_tgrl_host_mode_filters_host_actions_by_rack_units() -> None:
     library = _library()
-    payload = _load_json(ROOT / "examples" / "search_space_host_template_tgrl.json")
+    payload = _load_json(ROOT / "examples" / "search_space_host_template.json")
     payload["templates"][0]["racks"][0]["limits"]["max_rack_units"] = 14
     space = SearchSpace.model_validate(payload)
     chromosome = chromosome_from_template(space.templates[0], host_templates=space.host_template_map())
@@ -199,7 +199,7 @@ def test_tgrl_host_mode_filters_host_actions_by_rack_units() -> None:
 
 def test_host_rack_unit_capacity_replaces_rank_slot_limit() -> None:
     library = _library()
-    payload = _load_json(ROOT / "examples" / "search_space_host_template_tgrl.json")
+    payload = _load_json(ROOT / "examples" / "search_space_host_template.json")
     payload["templates"][0]["racks"][0]["max_slots"] = 8
     payload["templates"][0]["racks"][0]["limits"]["max_slots"] = 8
     space = SearchSpace.model_validate(payload)

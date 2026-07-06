@@ -62,14 +62,6 @@ If the local pip is old and reports that editable mode requires `setup.py` or
 Make sure the command is run with Python 3.11 or newer; macOS `/usr/bin/python3`
 is often Python 3.9 and is not supported by this package.
 
-On this workstation, the bundled Codex runtime has a compatible Python:
-
-```bash
-/Users/tianyi/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
 ## Quick Start
 
 Use the production topology-search path with a component catalog, search-space
@@ -182,7 +174,7 @@ Then run the optimizer with the LLM config path:
 codesign-opt search \
   --catalog ./examples/component_catalog.json \
   --space ./examples/search_space.json \
-  --workload ../mapper/examples/llm_qwen_tiny_config.json \
+  --workload ../mapper/examples/qwenconfig.json \
   --generations 2 \
   --population 4 \
   --out ./artifacts/search_llm
@@ -200,8 +192,8 @@ as pseudo-gradients to update node-type logits and link alpha values:
 
 ```bash
 codesign-opt tcro \
-  --catalog ./examples/component_catalog_tcro_latent_rack.json \
-  --space ./examples/search_space_tcro_latent_rack.json \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl.json \
   --workload ../mapper/examples/cg_iteration_workload.json \
   --steps 8 \
   --samples-per-step 4 \
@@ -233,8 +225,8 @@ with simulator telemetry priors, and evaluates one or more sampled candidates:
 
 ```bash
 codesign-opt tgrl \
-  --catalog ./examples/component_catalog_tcro_latent_rack.json \
-  --space ./examples/search_space_tcro_latent_rack.json \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl.json \
   --workload ../mapper/examples/cg_iteration_workload.json \
   --episodes 20 \
   --steps-per-episode 8 \
@@ -254,8 +246,8 @@ trajectory rewards with a KL-style pull toward the heuristic prior. TG-RL writes
 ```bash
 pip install -e ".[dev,rl]"
 codesign-opt tgrl \
-  --catalog ./examples/component_catalog_tcro_latent_rack.json \
-  --space ./examples/search_space_tcro_latent_rack.json \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl.json \
   --workload ../mapper/examples/cg_iteration_workload.json \
   --episodes 4 \
   --steps-per-episode 4 \
@@ -296,9 +288,9 @@ v2 also supports multi-workload optimization:
 
 ```bash
 codesign-opt tgrl \
-  --catalog ./examples/component_catalog_tcro_latent_rack.json \
-  --space ./examples/search_space_tcro_latent_rack.json \
-  --workload-suite ./examples/workload_suites/small_mixed_suite.json \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl.json \
+  --workload-suite ./examples/workload_suites/sparse_suite_example.json \
   --episodes 4 \
   --steps-per-episode 4 \
   --mode v2 \
@@ -323,8 +315,8 @@ Resume training with:
 
 ```bash
 codesign-opt tgrl \
-  --catalog ./examples/component_catalog_tcro_latent_rack.json \
-  --space ./examples/search_space_tcro_latent_rack.json \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl.json \
   --workload ../mapper/examples/cg_iteration_workload.json \
   --mode v2 \
   --resume ./artifacts/tgrl_v2_run/checkpoints/policy_latest.pt \
@@ -353,44 +345,29 @@ TG-RL v2 single-workload runs:
 
 ```bash
 codesign-opt exhaustive \
-  --catalog ./examples/component_catalog_tcro_latent_rack.json \
-  --space ./examples/search_space_4rack_exhaustive_tiny.json \
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl_exhaustive_tiny.json \
   --workload ../mapper/examples/cg_iteration_workload.json \
-  --concurrency 4 \
+  --concurrency 1 \
+  --no-allow-empty-slots \
   --out ./artifacts/exhaustive_tiny_run
 ```
 
-The tiny example fixes four racks with at most two compute devices per rack.
-Its `exhaustive.slot_options` contains two node choices, so the full space is
-`2^(4 racks * 2 slots) = 256` candidates. The runner validates that the space is
-finite, checks `exhaustive.max_candidates`, writes `candidate_*/score.json`, and
-exports `best_proposal.json`, `best_hardware_topology.json`, and
+The tiny example fixes one rack with two compute slots. Its
+`exhaustive.slot_options` contains two node choices, so the full space is
+`2^2 = 4` candidates. The runner validates that the space is finite, checks
+`exhaustive.max_candidates`, writes `candidate_*/score.json`, and exports
+`best_proposal.json`, `best_hardware_topology.json`, and
 `exhaustive_summary.json`.
-
-The same fixed-two-device pattern is also available as
-`search_space_3rack_exhaustive_tiny.json` with 64 candidates and
-`search_space_5rack_exhaustive_tiny.json` with 1024 candidates.
-
-Exhaustive search can also enumerate topology choices. By default it uses the
-finite topology lists in `exhaustive.intra_rack_topologies` and
-`exhaustive.inter_rack_topologies`; pass `--freeze-topology` to keep those
-fields fixed to the template values and enumerate only device choices. The
-four-device examples are:
-
-- `search_space_1rack_4device_exhaustive_topology.json`: 1 rack, 4 fixed
-  devices, initial 2 GPU + 2 CPU; 64 candidates with topology enumeration, 16
-  with `--freeze-topology`.
-- `search_space_2rack_4device_exhaustive_topology.json`: 2 racks, 4 fixed
-  devices per rack, initial 2 GPU + 2 CPU per rack; 12288 candidates with
-  topology enumeration, 256 with `--freeze-topology`.
 
 The same entrypoint is also available as a standalone script:
 
 ```bash
 python ./scripts/exhaustive_search.py \
-  --catalog ./examples/component_catalog_tcro_latent_rack.json \
-  --space ./examples/search_space_4rack_exhaustive_tiny.json \
-  --workload ../mapper/examples/cg_iteration_workload.json
+  --catalog ./examples/component_catalog_tgrl.json \
+  --space ./examples/search_space_tgrl_exhaustive_tiny.json \
+  --workload ../mapper/examples/cg_iteration_workload.json \
+  --no-allow-empty-slots
 ```
 
 ## Key Design Notes

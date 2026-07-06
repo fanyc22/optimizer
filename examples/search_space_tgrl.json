@@ -2,7 +2,7 @@
   "seed": 2601,
   "templates": [
     {
-      "name": "tcro_16gpu_16cpu_with_latent_racks",
+      "name": "tgrl_16gpu_16cpu_with_latent_racks",
       "racks": [
         {
           "rack_id": "gpu-rack0",

@@ -266,7 +266,7 @@ def _suite_feedback(*, speedup_a: float, speedup_b: float):
 
 
 def test_finite_candidate_count_skips_host_granularity() -> None:
-    fixture = Path(__file__).resolve().parents[1] / "examples" / "search_space_host_template_tgrl.json"
+    fixture = Path(__file__).resolve().parents[1] / "examples" / "search_space_host_template.json"
     space = SearchSpace.model_validate(json.loads(fixture.read_text()))
 
     assert space.mutation.search_granularity == "host"
