@@ -221,7 +221,17 @@ TG-RL v2 requires the optional RL dependency:
 
 ```bash
 pip install -e ".[dev,rl]"
+```
 
+On CPU-only machines, install the CPU PyTorch wheel first to avoid pulling a
+large CUDA-enabled wheel:
+
+```bash
+pip install "torch>=2.3" --index-url https://download.pytorch.org/whl/cpu
+pip install -e ".[dev,rl]"
+```
+
+```bash
 codesign-opt tgrl \
   --catalog ./examples/component_catalog_tgrl.json \
   --space ./examples/search_space_tgrl.json \
@@ -325,6 +335,3 @@ suites, and telemetry parsing.
 
 - Root optimizer manual: `../docs/optimizer.md`
 - End-to-end wrapper details: `../docs/pipeline.md`
-- Algorithm and implementation notes:
-  `docs/optimizer_algorithm_architecture_implementation.md`
-

@@ -4,13 +4,13 @@
   "workload_concurrency": 1,
   "workloads": [
     {
-      "name": "supernodal_latency",
+      "name": "supernodal",
       "path": "mapper/examples/supernodal_cholesky_demo.json",
       "weight": 0.5
     },
     {
-      "name": "supernodal_throughput",
-      "path": "mapper/examples/supernodal_cholesky_demo.json",
+      "name": "cg_iteration",
+      "path": "mapper/examples/cg_iteration_workload.json",
       "weight": 0.5
     }
   ]

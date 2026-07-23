@@ -64,6 +64,8 @@ class FakePipeline:
         workload_path: Path,
         out_dir: Path,
         workload_rank_parallel: bool | None = None,
+        workload_kind: str | None = None,
+        llm_use_all_gpus: bool | None = None,
     ) -> ParsedPipelineFeedback:
         out_dir.mkdir(parents=True, exist_ok=True)
         with self._lock:

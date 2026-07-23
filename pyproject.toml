@@ -23,6 +23,7 @@ dev = [
   "pytest>=8.2",
 ]
 rl = [
+  "numpy>=1.26",
   "torch>=2.3",
 ]
 
