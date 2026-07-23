@@ -8,8 +8,12 @@ version = "0.1.0"
 description = "Hardware/software topology search optimizer for heterogeneous CHASE architectures."
 readme = "README.md"
 requires-python = ">=3.11"
+license = {file = "LICENSE"}
 authors = [
-  {name = "Co-Design Team"}
+  {name = "Yuchen Fan"},
+  {name = "Minghong Sun"},
+  {name = "Jikui Ma"},
+  {name = "Shunyu Mao"},
 ]
 dependencies = [
   "pydantic>=2.7",

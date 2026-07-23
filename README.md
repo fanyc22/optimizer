@@ -333,3 +333,8 @@ suites, and telemetry parsing.
 - Root optimizer manual: `../docs/optimizer.md`
 - End-to-end wrapper details: `../docs/pipeline.md`
 - End-user workflows: `../docs/workflows.md`
+
+## License
+
+Copyright (c) 2026 Yuchen Fan, Minghong Sun, Jikui Ma, and Shunyu Mao.
+Released under the [MIT License](LICENSE).
