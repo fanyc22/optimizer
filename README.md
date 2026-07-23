@@ -2,13 +2,9 @@
 
 The CHASE optimizer is the outer hardware-search loop for **Cross-Layer
 Heterogeneous Agile System-Exploration**. It proposes physically feasible
-hardware candidates, exports each candidate as `hardware_topology.v2`, evaluates
-the candidate through the CHASE mapper and simulator, then uses parsed telemetry
-to choose the next architecture to explore.
-
-This package is a research artifact for the CHASE paper. It is intended to make
-the paper workflow inspectable and runnable at smoke scale, while still exposing
-the same optimizer entry points used for larger experiments.
+hardware candidates, exports each candidate in the v2 hardware-topology format,
+evaluates the candidate through the CHASE mapper and simulator, then uses parsed
+telemetry to choose the next architecture to explore.
 
 ## Overview
 
@@ -21,7 +17,7 @@ component catalog + search space
 optimizer candidate proposal
         |
         v
-hardware_topology.v2
+v2 hardware topology
         |
         v
 mapper -> event traces -> simulator
@@ -308,15 +304,16 @@ The wrapper removes large intermediate mapper/simulator traces by default for
 optimizer runs. Set `evaluation.save_wrapper_inputs` or
 `evaluation.save_operator_stats` only when debugging a specific case.
 
-## Relationship To The Paper
+## Choosing Run Budgets
 
-In the CHASE paper, the optimizer is the telemetry-guided outer loop in Stage
-III. It consumes the mapper/simulator feedback described by the framework and
-searches for physically feasible XHS candidates under deployment constraints.
+The quick-start examples deliberately use one or two evaluations so that users
+can validate an installation quickly. For an actual search, increase
+generations, population, TCRO steps, or TG-RL episodes incrementally while
+watching evaluation time, failure counts, convergence curves, and disk use.
 
-The quick-start examples here are intentionally small. Full paper-scale
-experiments require larger workload suites, longer search budgets, and
-calibration/evaluation inputs that are outside the fast smoke path.
+Start with the self-contained sparse workload suite before introducing external
+workloads. Preserve the catalog, search space, workload or suite, calibration
+model, random seed, and output summary together when comparing runs.
 
 ## Tests
 
@@ -335,3 +332,4 @@ suites, and telemetry parsing.
 
 - Root optimizer manual: `../docs/optimizer.md`
 - End-to-end wrapper details: `../docs/pipeline.md`
+- End-user workflows: `../docs/workflows.md`
